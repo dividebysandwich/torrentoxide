@@ -41,6 +41,9 @@ pub struct TorrentView {
     pub eta_secs: Option<u64>,
     pub error: Option<String>,
     pub output_folder: String,
+    /// A placeholder for an add still resolving in the background (metadata fetch).
+    #[serde(default)]
+    pub pending: bool,
 }
 
 /// The full live snapshot pushed over `/api/events` every second.

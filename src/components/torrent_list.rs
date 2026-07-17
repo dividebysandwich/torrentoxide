@@ -1,7 +1,7 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::api::{pause_torrent, resume_torrent};
+use crate::api::{dismiss_pending, pause_torrent, resume_torrent};
 use crate::components::sparkline::Sparkline;
 use crate::components::{dashboard_state, ConfirmData};
 use crate::types::{fmt_bytes, fmt_eta, fmt_speed, TorrentState, TorrentView};
@@ -21,11 +21,90 @@ pub fn TorrentList() -> impl IntoView {
     };
     let is_empty = move || state.snapshot.get().torrents.is_empty();
 
+    let render_row = move |id: usize| {
+        // A synthetic (pending) id never becomes a real id, so deciding once at
+        // row-creation time is stable for the row's lifetime.
+        let pending = state
+            .snapshot
+            .get_untracked()
+            .torrents
+            .iter()
+            .find(|t| t.id == id)
+            .map(|t| t.pending)
+            .unwrap_or(false);
+        if pending {
+            view! { <PendingRow id=id/> }.into_any()
+        } else {
+            view! { <TorrentRow id=id/> }.into_any()
+        }
+    };
+
     view! {
         <div class="torrent-list">
             <Show when=move || !is_empty() fallback=EmptyState>
-                <For each=ids key=|id| *id children=move |id| view! { <TorrentRow id=id/> }/>
+                <For each=ids key=|id| *id children=render_row/>
             </Show>
+        </div>
+    }
+}
+
+#[component]
+fn PendingRow(id: usize) -> impl IntoView {
+    let state = dashboard_state();
+
+    let torrent: Memo<Option<TorrentView>> = Memo::new(move |_| {
+        state
+            .snapshot
+            .get()
+            .torrents
+            .iter()
+            .find(|t| t.id == id)
+            .cloned()
+    });
+
+    let label = move || torrent.get().map(|t| t.name).unwrap_or_default();
+    let failed = move || matches!(torrent.get().map(|t| t.state), Some(TorrentState::Error));
+    let error = move || torrent.get().and_then(|t| t.error);
+
+    let dismiss = move |_| {
+        spawn_local(async move {
+            let _ = dismiss_pending(id).await;
+        });
+    };
+
+    view! {
+        <div class="torrent-row panel pending-row">
+            <div class="tr-main">
+                <div class="tr-head">
+                    <span class="tr-name" title=label>{label}</span>
+                    <span class=move || {
+                        if failed() { "badge badge-error" } else { "badge badge-initializing" }
+                    }>
+                        {move || if failed() { "failed" } else { "resolving" }}
+                    </span>
+                </div>
+                {move || {
+                    if failed() {
+                        view! {
+                            <p class="tr-error">{error().unwrap_or_else(|| "failed to add torrent".into())}</p>
+                        }
+                        .into_any()
+                    } else {
+                        view! {
+                            <div class="resolving">
+                                <span class="spinner"></span>
+                                "fetching metadata from peers…"
+                            </div>
+                        }
+                        .into_any()
+                    }
+                }}
+            </div>
+            <div class="tr-side">
+                {move || failed().then(|| view! {
+                    <button class="btn btn-ghost btn-sm" on:click=dismiss>"Dismiss"</button>
+                })}
+            </div>
         </div>
     }
 }

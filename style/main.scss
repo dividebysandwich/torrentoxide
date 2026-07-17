@@ -491,6 +491,34 @@ b {
   gap: 0.4rem;
 }
 
+// pending (metadata-resolving) placeholder row
+.pending-row {
+  border-style: dashed;
+}
+.resolving {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+  color: var(--violet);
+  font-size: 0.85rem;
+  letter-spacing: 0.5px;
+}
+.spinner {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(165, 107, 255, 0.25);
+  border-top-color: var(--violet);
+  animation: spin 0.8s linear infinite;
+  flex: 0 0 auto;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 // ---- empty state -------------------------------------------------------
 
 .empty-state {

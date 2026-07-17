@@ -2,8 +2,9 @@
 
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context};
 use librqbit::api::{ApiTorrentListOpts, TorrentIdOrHash};
@@ -17,9 +18,35 @@ use crate::types::{DirEntry, DirListing, StatsSnapshot, TorrentState, TorrentVie
 
 const MIB: f64 = 1024.0 * 1024.0;
 
+/// Background adds get synthetic ids well above any real librqbit id (small usize),
+/// so they never collide with managed-torrent ids.
+const PENDING_ID_BASE: usize = 1usize << 48;
+/// Give up resolving a magnet's metadata after this long.
+const RESOLVE_TIMEOUT: Duration = Duration::from_secs(300);
+/// Keep a failed pending entry visible this long before auto-expiring it.
+const FAILED_TTL: Duration = Duration::from_secs(90);
+
+#[derive(Clone)]
+enum PendingStatus {
+    Resolving,
+    Failed(String),
+}
+
+/// An add that is still being processed in the background (e.g. a magnet whose
+/// metadata is being fetched from peers). Surfaced to the UI as a placeholder row.
+struct PendingAdd {
+    id: usize,
+    label: String,
+    output_dir: String,
+    status: PendingStatus,
+    at: Instant,
+}
+
 pub struct Engine {
     pub api: Api,
     pub config: Arc<AppConfig>,
+    pending: Mutex<Vec<PendingAdd>>,
+    next_pending: AtomicU64,
 }
 
 impl Engine {
@@ -35,35 +62,59 @@ impl Engine {
             .await
             .context("failed to start librqbit session")?;
         let api = Api::new(session, None);
-        Ok(Arc::new(Self { api, config }))
+        Ok(Arc::new(Self {
+            api,
+            config,
+            pending: Mutex::new(Vec::new()),
+            next_pending: AtomicU64::new(0),
+        }))
     }
 
-    // --- torrent actions ---------------------------------------------------
+    // --- adding torrents ---------------------------------------------------
 
-    pub async fn add_url(
-        &self,
+    /// Add a magnet link or http(s) URL WITHOUT blocking: validates the target
+    /// directory synchronously (fast failure for bad input), then resolves
+    /// metadata in the background. A placeholder row appears immediately.
+    pub fn spawn_add_url(
+        self: &Arc<Self>,
         source: String,
         output_dir: String,
         paused: bool,
     ) -> anyhow::Result<()> {
+        let source = source.trim().to_string();
+        if source.is_empty() {
+            bail!("no magnet link or URL provided");
+        }
         let dir = self.confine(&output_dir)?;
         std::fs::create_dir_all(&dir).ok();
-        let opts = AddTorrentOptions {
-            output_folder: Some(dir.to_string_lossy().into_owned()),
-            paused,
-            overwrite: true,
-            ..Default::default()
-        };
-        tokio::time::timeout(
-            Duration::from_secs(90),
-            self.api.api_add_torrent(AddTorrent::from_url(source), Some(opts)),
-        )
-        .await
-        .context("timed out while adding torrent")?
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let dir = dir.to_string_lossy().into_owned();
+
+        let id = self.push_pending(source_label(&source), dir.clone());
+        let engine = self.clone();
+        tokio::spawn(async move {
+            let opts = AddTorrentOptions {
+                output_folder: Some(dir),
+                paused,
+                overwrite: true,
+                ..Default::default()
+            };
+            let outcome = match tokio::time::timeout(
+                RESOLVE_TIMEOUT,
+                engine.api.api_add_torrent(AddTorrent::from_url(source), Some(opts)),
+            )
+            .await
+            {
+                Err(_) => Err("timed out fetching metadata from peers".to_string()),
+                Ok(Err(e)) => Err(e.to_string()),
+                Ok(Ok(_)) => Ok(()),
+            };
+            engine.finish_pending(id, outcome);
+        });
         Ok(())
     }
 
+    /// Add from raw `.torrent` bytes (metadata is embedded, so this is fast and
+    /// stays synchronous to give the uploader immediate success/error feedback).
     pub async fn add_bytes(
         &self,
         bytes: Vec<u8>,
@@ -79,7 +130,7 @@ impl Engine {
             ..Default::default()
         };
         tokio::time::timeout(
-            Duration::from_secs(90),
+            Duration::from_secs(60),
             self.api.api_add_torrent(AddTorrent::from_bytes(bytes), Some(opts)),
         )
         .await
@@ -87,6 +138,39 @@ impl Engine {
         .map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(())
     }
+
+    fn push_pending(&self, label: String, output_dir: String) -> usize {
+        let id = PENDING_ID_BASE + self.next_pending.fetch_add(1, Ordering::Relaxed) as usize;
+        self.pending.lock().unwrap().push(PendingAdd {
+            id,
+            label,
+            output_dir,
+            status: PendingStatus::Resolving,
+            at: Instant::now(),
+        });
+        id
+    }
+
+    fn finish_pending(&self, id: usize, outcome: Result<(), String>) {
+        let mut pending = self.pending.lock().unwrap();
+        match outcome {
+            // Success: the real torrent now shows up in the managed list; drop the placeholder.
+            Ok(()) => pending.retain(|p| p.id != id),
+            Err(msg) => {
+                if let Some(p) = pending.iter_mut().find(|p| p.id == id) {
+                    p.status = PendingStatus::Failed(msg);
+                    p.at = Instant::now();
+                }
+            }
+        }
+    }
+
+    /// Dismiss a failed pending placeholder row.
+    pub fn dismiss_pending(&self, id: usize) {
+        self.pending.lock().unwrap().retain(|p| p.id != id);
+    }
+
+    // --- torrent actions ---------------------------------------------------
 
     pub async fn pause(&self, id: usize) -> anyhow::Result<()> {
         self.api
@@ -181,10 +265,39 @@ impl Engine {
                 eta_secs,
                 error: stats.error,
                 output_folder: t.output_folder,
+                pending: false,
             });
         }
 
         torrents.sort_by_key(|t| t.id);
+
+        // Append background-add placeholders (and expire stale failed ones).
+        {
+            let mut pending = self.pending.lock().unwrap();
+            pending.retain(|p| !(matches!(p.status, PendingStatus::Failed(_)) && p.at.elapsed() > FAILED_TTL));
+            for p in pending.iter() {
+                let (state, error) = match &p.status {
+                    PendingStatus::Resolving => (TorrentState::Initializing, None),
+                    PendingStatus::Failed(msg) => (TorrentState::Error, Some(msg.clone())),
+                };
+                torrents.push(TorrentView {
+                    id: p.id,
+                    name: p.label.clone(),
+                    state,
+                    progress: 0.0,
+                    total_bytes: 0,
+                    downloaded_bytes: 0,
+                    uploaded_bytes: 0,
+                    down_bps: 0.0,
+                    up_bps: 0.0,
+                    eta_secs: None,
+                    error,
+                    output_folder: p.output_dir.clone(),
+                    pending: true,
+                });
+            }
+        }
+
         StatsSnapshot {
             global_down_bps: global_down,
             global_up_bps: global_up,
@@ -287,6 +400,71 @@ impl Engine {
             );
         }
         Ok(full)
+    }
+}
+
+/// Derive a friendly label for a pending add from a magnet link or URL.
+fn source_label(source: &str) -> String {
+    if let Some(rest) = source.strip_prefix("magnet:?") {
+        for kv in rest.split('&') {
+            if let Some(v) = kv.strip_prefix("dn=") {
+                let name = percent_decode(v);
+                if !name.trim().is_empty() {
+                    return name;
+                }
+            }
+        }
+        for kv in rest.split('&') {
+            if let Some(v) = kv.strip_prefix("xt=urn:btih:") {
+                let short = &v[..v.len().min(16)];
+                return format!("magnet {short}…");
+            }
+        }
+        return "magnet link".to_string();
+    }
+    source
+        .rsplit('/')
+        .find(|s| !s.is_empty())
+        .unwrap_or(source)
+        .to_string()
+}
+
+/// Minimal application/x-www-form-urlencoded percent-decoder for display labels.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'%' if i + 2 < bytes.len() => match (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                (Some(a), Some(b)) => {
+                    out.push(a * 16 + b);
+                    i += 3;
+                }
+                _ => {
+                    out.push(bytes[i]);
+                    i += 1;
+                }
+            },
+            b'+' => {
+                out.push(b' ');
+                i += 1;
+            }
+            c => {
+                out.push(c);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
     }
 }
 

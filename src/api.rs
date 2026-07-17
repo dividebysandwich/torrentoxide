@@ -9,11 +9,20 @@ use crate::types::{AddRequest, Defaults, DirListing, TorrentView};
 pub async fn add_torrent(req: AddRequest) -> Result<(), ServerFnError> {
     use crate::server::AppState;
     let state = expect_context::<AppState>();
+    // Non-blocking: validates the target dir now, resolves metadata in the
+    // background, and surfaces progress/errors via the live stats stream.
     state
         .engine
-        .add_url(req.source, req.output_dir, req.paused)
-        .await
+        .spawn_add_url(req.source, req.output_dir, req.paused)
         .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(())
+}
+
+#[server]
+pub async fn dismiss_pending(id: usize) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state.engine.dismiss_pending(id);
     Ok(())
 }
 
