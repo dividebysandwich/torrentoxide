@@ -21,7 +21,7 @@ pub fn TorrentList() -> impl IntoView {
     };
     let is_empty = move || state.snapshot.get().torrents.is_empty();
 
-    let render_row = move |id: usize| {
+    let render_row = move |id: u64| {
         // A synthetic (pending) id never becomes a real id, so deciding once at
         // row-creation time is stable for the row's lifetime.
         let pending = state
@@ -49,7 +49,7 @@ pub fn TorrentList() -> impl IntoView {
 }
 
 #[component]
-fn PendingRow(id: usize) -> impl IntoView {
+fn PendingRow(id: u64) -> impl IntoView {
     let state = dashboard_state();
 
     let torrent: Memo<Option<TorrentView>> = Memo::new(move |_| {
@@ -121,7 +121,7 @@ fn EmptyState() -> impl IntoView {
 }
 
 #[component]
-fn TorrentRow(id: usize) -> impl IntoView {
+fn TorrentRow(id: u64) -> impl IntoView {
     let state = dashboard_state();
 
     let torrent: Memo<Option<TorrentView>> = Memo::new(move |_| {

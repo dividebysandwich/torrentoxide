@@ -19,7 +19,7 @@ pub async fn add_torrent(req: AddRequest) -> Result<(), ServerFnError> {
 }
 
 #[server]
-pub async fn dismiss_pending(id: usize) -> Result<(), ServerFnError> {
+pub async fn dismiss_pending(id: u64) -> Result<(), ServerFnError> {
     use crate::server::AppState;
     let state = expect_context::<AppState>();
     state.engine.dismiss_pending(id);
@@ -27,7 +27,7 @@ pub async fn dismiss_pending(id: usize) -> Result<(), ServerFnError> {
 }
 
 #[server]
-pub async fn pause_torrent(id: usize) -> Result<(), ServerFnError> {
+pub async fn pause_torrent(id: u64) -> Result<(), ServerFnError> {
     use crate::server::AppState;
     let state = expect_context::<AppState>();
     state
@@ -39,7 +39,7 @@ pub async fn pause_torrent(id: usize) -> Result<(), ServerFnError> {
 }
 
 #[server]
-pub async fn resume_torrent(id: usize) -> Result<(), ServerFnError> {
+pub async fn resume_torrent(id: u64) -> Result<(), ServerFnError> {
     use crate::server::AppState;
     let state = expect_context::<AppState>();
     state
@@ -51,7 +51,7 @@ pub async fn resume_torrent(id: usize) -> Result<(), ServerFnError> {
 }
 
 #[server]
-pub async fn cancel_torrent(id: usize) -> Result<(), ServerFnError> {
+pub async fn cancel_torrent(id: u64) -> Result<(), ServerFnError> {
     use crate::server::AppState;
     let state = expect_context::<AppState>();
     state
@@ -63,7 +63,7 @@ pub async fn cancel_torrent(id: usize) -> Result<(), ServerFnError> {
 }
 
 #[server]
-pub async fn delete_torrent(id: usize) -> Result<(), ServerFnError> {
+pub async fn delete_torrent(id: u64) -> Result<(), ServerFnError> {
     use crate::server::AppState;
     let state = expect_context::<AppState>();
     state

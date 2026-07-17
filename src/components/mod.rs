@@ -20,7 +20,7 @@ pub const ROW_HIST_LEN: usize = 48;
 /// A pending destructive action awaiting confirmation.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConfirmData {
-    pub id: usize,
+    pub id: u64,
     pub name: String,
     /// `true` = cancel and delete files; `false` = cancel only.
     pub delete_files: bool,
@@ -34,7 +34,7 @@ pub struct DashboardState {
     /// Rolling (down_bps, up_bps) history for the global graph.
     pub global_hist: RwSignal<VecDeque<(f64, f64)>>,
     /// Rolling (down_bps, up_bps) history per torrent id.
-    pub torrent_hist: RwSignal<HashMap<usize, VecDeque<(f64, f64)>>>,
+    pub torrent_hist: RwSignal<HashMap<u64, VecDeque<(f64, f64)>>>,
     /// Server defaults (download dir, browse root, auth flag).
     pub defaults: RwSignal<Defaults>,
     /// Whether the SSE stream has delivered at least one snapshot.
@@ -70,7 +70,7 @@ impl DashboardState {
             }
         });
 
-        let live_ids: HashSet<usize> = snap.torrents.iter().map(|t| t.id).collect();
+        let live_ids: HashSet<u64> = snap.torrents.iter().map(|t| t.id).collect();
         self.torrent_hist.update(|m| {
             for t in &snap.torrents {
                 let dq = m.entry(t.id).or_default();

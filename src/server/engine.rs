@@ -18,9 +18,9 @@ use crate::types::{DirEntry, DirListing, StatsSnapshot, TorrentState, TorrentVie
 
 const MIB: f64 = 1024.0 * 1024.0;
 
-/// Background adds get synthetic ids well above any real librqbit id (small usize),
-/// so they never collide with managed-torrent ids.
-const PENDING_ID_BASE: usize = 1usize << 48;
+/// Background adds get synthetic ids well above any real librqbit id (small),
+/// so they never collide with managed-torrent ids. Wire ids are `u64`.
+const PENDING_ID_BASE: u64 = 1u64 << 48;
 /// Give up resolving a magnet's metadata after this long.
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(300);
 /// Keep a failed pending entry visible this long before auto-expiring it.
@@ -35,7 +35,7 @@ enum PendingStatus {
 /// An add that is still being processed in the background (e.g. a magnet whose
 /// metadata is being fetched from peers). Surfaced to the UI as a placeholder row.
 struct PendingAdd {
-    id: usize,
+    id: u64,
     label: String,
     output_dir: String,
     status: PendingStatus,
@@ -139,8 +139,8 @@ impl Engine {
         Ok(())
     }
 
-    fn push_pending(&self, label: String, output_dir: String) -> usize {
-        let id = PENDING_ID_BASE + self.next_pending.fetch_add(1, Ordering::Relaxed) as usize;
+    fn push_pending(&self, label: String, output_dir: String) -> u64 {
+        let id = PENDING_ID_BASE + self.next_pending.fetch_add(1, Ordering::Relaxed);
         self.pending.lock().unwrap().push(PendingAdd {
             id,
             label,
@@ -151,7 +151,7 @@ impl Engine {
         id
     }
 
-    fn finish_pending(&self, id: usize, outcome: Result<(), String>) {
+    fn finish_pending(&self, id: u64, outcome: Result<(), String>) {
         let mut pending = self.pending.lock().unwrap();
         match outcome {
             // Success: the real torrent now shows up in the managed list; drop the placeholder.
@@ -166,41 +166,41 @@ impl Engine {
     }
 
     /// Dismiss a failed pending placeholder row.
-    pub fn dismiss_pending(&self, id: usize) {
+    pub fn dismiss_pending(&self, id: u64) {
         self.pending.lock().unwrap().retain(|p| p.id != id);
     }
 
     // --- torrent actions ---------------------------------------------------
 
-    pub async fn pause(&self, id: usize) -> anyhow::Result<()> {
+    pub async fn pause(&self, id: u64) -> anyhow::Result<()> {
         self.api
-            .api_torrent_action_pause(TorrentIdOrHash::Id(id))
+            .api_torrent_action_pause(TorrentIdOrHash::Id(id as usize))
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(())
     }
 
-    pub async fn resume(&self, id: usize) -> anyhow::Result<()> {
+    pub async fn resume(&self, id: u64) -> anyhow::Result<()> {
         self.api
-            .api_torrent_action_start(TorrentIdOrHash::Id(id))
+            .api_torrent_action_start(TorrentIdOrHash::Id(id as usize))
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(())
     }
 
     /// Cancel a torrent but keep any downloaded files.
-    pub async fn cancel(&self, id: usize) -> anyhow::Result<()> {
+    pub async fn cancel(&self, id: u64) -> anyhow::Result<()> {
         self.api
-            .api_torrent_action_forget(TorrentIdOrHash::Id(id))
+            .api_torrent_action_forget(TorrentIdOrHash::Id(id as usize))
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(())
     }
 
     /// Cancel a torrent AND delete its files from disk.
-    pub async fn delete(&self, id: usize) -> anyhow::Result<()> {
+    pub async fn delete(&self, id: u64) -> anyhow::Result<()> {
         self.api
-            .api_torrent_action_delete(TorrentIdOrHash::Id(id))
+            .api_torrent_action_delete(TorrentIdOrHash::Id(id as usize))
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(())
@@ -253,7 +253,7 @@ impl Engine {
             };
 
             torrents.push(TorrentView {
-                id,
+                id: id as u64,
                 name: t.name.unwrap_or_else(|| t.info_hash.clone()),
                 state,
                 progress,

@@ -28,7 +28,9 @@ impl TorrentState {
 /// A single torrent's current view, refreshed each SSE tick.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TorrentView {
-    pub id: usize,
+    // NOTE: `u64` (not `usize`) — the wasm client is 32-bit, so a `usize` here
+    // would fail to deserialize any id above u32::MAX (e.g. pending placeholders).
+    pub id: u64,
     pub name: String,
     pub state: TorrentState,
     /// 0.0 ..= 1.0
