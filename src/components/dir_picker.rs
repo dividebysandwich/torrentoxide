@@ -1,3 +1,4 @@
+use leptos::portal::Portal;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
@@ -73,6 +74,9 @@ pub fn DirPicker(
     };
 
     view! {
+        // Teleport the modal to <body> so it escapes the .add-panel backdrop-filter
+        // stacking context (otherwise later sibling torrent rows paint over it).
+        <Portal>
         {move || open.get().then(|| {
             view! {
                 <div class="modal-overlay" on:click=close>
@@ -155,5 +159,6 @@ pub fn DirPicker(
                 </div>
             }
         })}
+        </Portal>
     }
 }
