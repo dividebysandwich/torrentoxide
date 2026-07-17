@@ -46,6 +46,9 @@ pub struct TorrentView {
     /// A placeholder for an add still resolving in the background (metadata fetch).
     #[serde(default)]
     pub pending: bool,
+    /// Server-recorded rolling (down_bps, up_bps) history for this torrent's sparkline.
+    #[serde(default)]
+    pub history: Vec<(f64, f64)>,
 }
 
 /// The full live snapshot pushed over `/api/events` every second.
@@ -53,6 +56,9 @@ pub struct TorrentView {
 pub struct StatsSnapshot {
     pub global_down_bps: f64,
     pub global_up_bps: f64,
+    /// Server-recorded rolling (down_bps, up_bps) history for the global graph.
+    #[serde(default)]
+    pub global_hist: Vec<(f64, f64)>,
     pub torrents: Vec<TorrentView>,
 }
 

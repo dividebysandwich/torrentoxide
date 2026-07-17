@@ -109,5 +109,5 @@ pub async fn get_defaults() -> Result<Defaults, ServerFnError> {
 pub async fn list_torrents() -> Result<Vec<TorrentView>, ServerFnError> {
     use crate::server::AppState;
     let state = expect_context::<AppState>();
-    Ok(state.engine.snapshot().torrents)
+    Ok(state.engine.current().torrents.clone())
 }

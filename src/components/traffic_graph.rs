@@ -13,7 +13,7 @@ pub fn TrafficGraph() -> impl IntoView {
 
     // Returns (down_area, up_area, down_line, up_line) SVG path/points strings.
     let geometry = move || {
-        let hist: Vec<(f64, f64)> = state.global_hist.get().into_iter().collect();
+        let hist: Vec<(f64, f64)> = state.snapshot.get().global_hist;
         let n = hist.len();
         if n < 2 {
             return (String::new(), String::new(), String::new(), String::new());

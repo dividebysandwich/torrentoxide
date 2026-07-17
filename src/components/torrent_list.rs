@@ -134,14 +134,7 @@ fn TorrentRow(id: u64) -> impl IntoView {
             .cloned()
     });
 
-    let history = move || {
-        state
-            .torrent_hist
-            .get()
-            .get(&id)
-            .map(|dq| dq.iter().copied().collect::<Vec<(f64, f64)>>())
-            .unwrap_or_default()
-    };
+    let history = move || torrent.get().map(|t| t.history).unwrap_or_default();
 
     let name = move || torrent.get().map(|t| t.name).unwrap_or_default();
     let st = move || torrent.get().map(|t| t.state).unwrap_or(TorrentState::Initializing);

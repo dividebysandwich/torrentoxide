@@ -1,5 +1,6 @@
 //! librqbit integration: session/api lifecycle, actions, and stats snapshots.
 
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -12,6 +13,7 @@ use librqbit::{
     AddTorrent, AddTorrentOptions, Api, Session, SessionOptions, SessionPersistenceConfig,
     TorrentStatsState,
 };
+use tokio::sync::watch;
 
 use crate::server::config::AppConfig;
 use crate::types::{DirEntry, DirListing, StatsSnapshot, TorrentState, TorrentView};
@@ -21,6 +23,19 @@ const MIB: f64 = 1024.0 * 1024.0;
 /// Background adds get synthetic ids well above any real librqbit id (small),
 /// so they never collide with managed-torrent ids. Wire ids are `u64`.
 const PENDING_ID_BASE: u64 = 1u64 << 48;
+
+/// How many 1-second samples the global graph retains (~2 minutes).
+const GLOBAL_HIST_LEN: usize = 120;
+/// How many 1-second samples each per-torrent sparkline retains.
+const ROW_HIST_LEN: usize = 48;
+
+/// Rolling traffic history, recorded server-side so it survives client refreshes
+/// and keeps advancing even when no browser is connected.
+#[derive(Default)]
+struct History {
+    global: VecDeque<(f64, f64)>,
+    per_torrent: HashMap<usize, VecDeque<(f64, f64)>>,
+}
 /// Give up resolving a magnet's metadata after this long.
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(300);
 /// Keep a failed pending entry visible this long before auto-expiring it.
@@ -47,6 +62,9 @@ pub struct Engine {
     pub config: Arc<AppConfig>,
     pending: Mutex<Vec<PendingAdd>>,
     next_pending: AtomicU64,
+    history: Mutex<History>,
+    /// Latest snapshot (with embedded history); updated by the sampler, relayed by SSE.
+    tx: watch::Sender<Arc<StatsSnapshot>>,
 }
 
 impl Engine {
@@ -62,12 +80,42 @@ impl Engine {
             .await
             .context("failed to start librqbit session")?;
         let api = Api::new(session, None);
-        Ok(Arc::new(Self {
+
+        let (tx, _rx) = watch::channel(Arc::new(StatsSnapshot::default()));
+        let engine = Arc::new(Self {
             api,
             config,
             pending: Mutex::new(Vec::new()),
             next_pending: AtomicU64::new(0),
-        }))
+            history: Mutex::new(History::default()),
+            tx,
+        });
+
+        // Sample stats + record history once per second, independent of any
+        // connected client, and broadcast the result to SSE subscribers.
+        let sampler = engine.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            loop {
+                interval.tick().await;
+                let snapshot = sampler.sample_and_record();
+                // `send_replace` always stores the value (even with zero subscribers),
+                // so a client connecting later immediately gets the full history.
+                let _ = sampler.tx.send_replace(Arc::new(snapshot));
+            }
+        });
+
+        Ok(engine)
+    }
+
+    /// Subscribe to the live snapshot stream (used by the SSE endpoint).
+    pub fn subscribe(&self) -> watch::Receiver<Arc<StatsSnapshot>> {
+        self.tx.subscribe()
+    }
+
+    /// The most recent snapshot recorded by the sampler.
+    pub fn current(&self) -> Arc<StatsSnapshot> {
+        self.tx.borrow().clone()
     }
 
     // --- adding torrents ---------------------------------------------------
@@ -208,12 +256,15 @@ impl Engine {
 
     // --- stats -------------------------------------------------------------
 
-    pub fn snapshot(&self) -> StatsSnapshot {
+    /// Sample current stats, fold them into the rolling history, and produce the
+    /// snapshot (with history embedded) that gets broadcast to clients.
+    fn sample_and_record(&self) -> StatsSnapshot {
         let list = self
             .api
             .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
 
-        let mut torrents = Vec::with_capacity(list.torrents.len());
+        // id (usize) kept alongside each view so we can key its history.
+        let mut reals: Vec<(usize, TorrentView)> = Vec::with_capacity(list.torrents.len());
         let mut global_down = 0.0f64;
         let mut global_up = 0.0f64;
 
@@ -252,23 +303,51 @@ impl Engine {
                 None
             };
 
-            torrents.push(TorrentView {
-                id: id as u64,
-                name: t.name.unwrap_or_else(|| t.info_hash.clone()),
-                state,
-                progress,
-                total_bytes: stats.total_bytes,
-                downloaded_bytes: stats.progress_bytes,
-                uploaded_bytes: stats.uploaded_bytes,
-                down_bps,
-                up_bps,
-                eta_secs,
-                error: stats.error,
-                output_folder: t.output_folder,
-                pending: false,
-            });
+            reals.push((
+                id,
+                TorrentView {
+                    id: id as u64,
+                    name: t.name.unwrap_or_else(|| t.info_hash.clone()),
+                    state,
+                    progress,
+                    total_bytes: stats.total_bytes,
+                    downloaded_bytes: stats.progress_bytes,
+                    uploaded_bytes: stats.uploaded_bytes,
+                    down_bps,
+                    up_bps,
+                    eta_secs,
+                    error: stats.error,
+                    output_folder: t.output_folder,
+                    pending: false,
+                    history: Vec::new(),
+                },
+            ));
         }
 
+        // Record the sample into the rolling buffers and read the history back
+        // into each view / the global series.
+        let global_hist = {
+            let mut hist = self.history.lock().unwrap();
+            hist.global.push_back((global_down, global_up));
+            while hist.global.len() > GLOBAL_HIST_LEN {
+                hist.global.pop_front();
+            }
+
+            let live: HashSet<usize> = reals.iter().map(|(id, _)| *id).collect();
+            for (id, view) in reals.iter_mut() {
+                let dq = hist.per_torrent.entry(*id).or_default();
+                dq.push_back((view.down_bps, view.up_bps));
+                while dq.len() > ROW_HIST_LEN {
+                    dq.pop_front();
+                }
+                view.history = dq.iter().copied().collect();
+            }
+            hist.per_torrent.retain(|id, _| live.contains(id));
+
+            hist.global.iter().copied().collect::<Vec<_>>()
+        };
+
+        let mut torrents: Vec<TorrentView> = reals.into_iter().map(|(_, v)| v).collect();
         torrents.sort_by_key(|t| t.id);
 
         // Append background-add placeholders (and expire stale failed ones).
@@ -294,6 +373,7 @@ impl Engine {
                     error,
                     output_folder: p.output_dir.clone(),
                     pending: true,
+                    history: Vec::new(),
                 });
             }
         }
@@ -301,6 +381,7 @@ impl Engine {
         StatsSnapshot {
             global_down_bps: global_down,
             global_up_bps: global_up,
+            global_hist,
             torrents,
         }
     }
