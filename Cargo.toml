@@ -1,0 +1,112 @@
+[package]
+name = "torrentoxide"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# --- shared (both wasm + native) ---
+leptos = { version = "0.8" }
+leptos_router = { version = "0.8" }
+leptos_meta = { version = "0.8" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# --- hydrate (wasm) only ---
+console_error_panic_hook = { version = "0.1", optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+gloo-net = { version = "0.6", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+  "EventSource",
+  "MessageEvent",
+  "Event",
+  "EventTarget",
+  "Blob",
+  "File",
+  "FileList",
+  "FormData",
+  "HtmlInputElement",
+  "Window",
+] }
+
+# --- ssr (native) only ---
+leptos_axum = { version = "0.8", optional = true }
+axum = { version = "0.8", optional = true, features = ["multipart", "macros"] }
+axum-extra = { version = "0.10", optional = true, features = ["cookie-signed"] }
+cookie = { version = "0.18", optional = true, features = ["key-expansion"] }
+tokio = { version = "1", optional = true, features = ["full"] }
+tower = { version = "0.5", optional = true }
+tower-http = { version = "0.6", optional = true, features = ["fs"] }
+http = { version = "1", optional = true }
+librqbit = { version = "8", optional = true, default-features = false, features = [
+  "rust-tls",
+] }
+dotenvy = { version = "0.15", optional = true }
+async-stream = { version = "0.3", optional = true }
+futures = { version = "0.3", optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", optional = true, features = ["env-filter"] }
+anyhow = { version = "1", optional = true }
+
+[features]
+default = ["ssr"]
+hydrate = [
+  "leptos/hydrate",
+  "dep:console_error_panic_hook",
+  "dep:wasm-bindgen",
+  "dep:wasm-bindgen-futures",
+  "dep:gloo-net",
+  "dep:web-sys",
+]
+ssr = [
+  "leptos/ssr",
+  "leptos_meta/ssr",
+  "leptos_router/ssr",
+  "dep:leptos_axum",
+  "dep:axum",
+  "dep:axum-extra",
+  "dep:cookie",
+  "dep:tokio",
+  "dep:tower",
+  "dep:tower-http",
+  "dep:http",
+  "dep:librqbit",
+  "dep:dotenvy",
+  "dep:async-stream",
+  "dep:futures",
+  "dep:tracing",
+  "dep:tracing-subscriber",
+  "dep:anyhow",
+]
+
+# cargo-leptos wants the binary and library to be separate.
+[[bin]]
+name = "torrentoxide"
+path = "src/main.rs"
+
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[package.metadata.leptos]
+output-name = "torrentoxide"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+style-file = "style/main.scss"
+assets-dir = "public"
+site-addr = "127.0.0.1:3000"
+reload-port = 3001
+browserquery = "defaults"
+watch = false
+env = "DEV"
+bin-features = ["ssr"]
+bin-default-features = false
+lib-features = ["hydrate"]
+lib-default-features = false
+lib-profile-release = "wasm-release"

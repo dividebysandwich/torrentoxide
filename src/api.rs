@@ -1,0 +1,104 @@
+//! Leptos server functions (type-safe RPC). Bodies run only under `ssr`;
+//! on the client these become network calls to `/api/*`.
+
+use leptos::prelude::*;
+
+use crate::types::{AddRequest, Defaults, DirListing, TorrentView};
+
+#[server]
+pub async fn add_torrent(req: AddRequest) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .engine
+        .add_url(req.source, req.output_dir, req.paused)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(())
+}
+
+#[server]
+pub async fn pause_torrent(id: usize) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .engine
+        .pause(id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(())
+}
+
+#[server]
+pub async fn resume_torrent(id: usize) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .engine
+        .resume(id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(())
+}
+
+#[server]
+pub async fn cancel_torrent(id: usize) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .engine
+        .cancel(id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(())
+}
+
+#[server]
+pub async fn delete_torrent(id: usize) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .engine
+        .delete(id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))?;
+    Ok(())
+}
+
+#[server]
+pub async fn browse_dir(path: Option<String>) -> Result<DirListing, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .engine
+        .browse(path)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn make_dir(parent: String, name: String) -> Result<DirListing, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .engine
+        .make_dir(parent, name)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn get_defaults() -> Result<Defaults, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    Ok(Defaults {
+        download_dir: state.config.download_dir.to_string_lossy().into_owned(),
+        browse_root: state.config.browse_root.to_string_lossy().into_owned(),
+        auth_enabled: state.config.auth_enabled(),
+    })
+}
+
+#[server]
+pub async fn list_torrents() -> Result<Vec<TorrentView>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    Ok(state.engine.snapshot().torrents)
+}
