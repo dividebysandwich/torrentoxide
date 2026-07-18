@@ -47,6 +47,15 @@ pub fn ControlDeck() -> impl IntoView {
             "—".to_string()
         }
     };
+    // Which mount is being measured (statvfs of the download folder's drive).
+    let disk_title = move || {
+        let p = state.defaults.get().download_dir;
+        if p.is_empty() {
+            "Used / total capacity of the drive hosting the download folder".to_string()
+        } else {
+            format!("Used / total capacity of the drive hosting {p}")
+        }
+    };
 
     // Load persisted settings once, client-side.
     Effect::new(move |_| {
@@ -150,7 +159,7 @@ pub fn ControlDeck() -> impl IntoView {
             <span class="deck-hint">
                 {move || if loaded.get() { "0 = UNLIMITED" } else { "SYNC…" }}
             </span>
-            <div class="deck-disk" class:low=disk_low>
+            <div class="deck-disk" class:low=disk_low title=disk_title>
                 <span class="deck-label">"◆ DISK"</span>
                 <div class="disk-bar">
                     <span
