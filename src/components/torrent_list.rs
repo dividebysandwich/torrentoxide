@@ -1,10 +1,21 @@
+use std::time::Duration;
+
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{dismiss_pending, pause_torrent, resume_torrent};
+use crate::components::bitfield::Bitfield;
+use crate::components::fx::chirp;
+use crate::components::scramble::Scramble;
 use crate::components::sparkline::Sparkline;
 use crate::components::{dashboard_state, ConfirmData};
 use crate::types::{fmt_bytes, fmt_eta, fmt_speed, TorrentState, TorrentView};
+
+/// Briefly set a boolean signal to drive a one-shot CSS effect.
+fn flash(sig: RwSignal<bool>, ms: u64) {
+    sig.set(true);
+    set_timeout(move || sig.set(false), Duration::from_millis(ms));
+}
 
 #[component]
 pub fn TorrentList() -> impl IntoView {
@@ -154,9 +165,33 @@ fn TorrentRow(id: u64) -> impl IntoView {
 
     let is_paused = move || matches!(st(), TorrentState::Paused);
 
+    // One-shot effects: "materialize" glitch on first appearance, RGB-glitch on
+    // error, and a completion burst when the torrent finishes.
+    let burst = RwSignal::new(false);
+    let glitch = RwSignal::new(false);
+    Effect::new(move |prev: Option<TorrentState>| {
+        let cur = st();
+        match prev {
+            None => flash(glitch, 520),
+            Some(p) if p != cur => match cur {
+                // only celebrate a genuine completion, not a resume from paused
+                TorrentState::Finished
+                    if matches!(p, TorrentState::Live | TorrentState::Initializing) =>
+                {
+                    flash(burst, 1500)
+                }
+                TorrentState::Error => flash(glitch, 520),
+                _ => {}
+            },
+            _ => {}
+        }
+        cur
+    });
+
     // Actions
     let toggle_pause = move |_| {
         let paused = is_paused();
+        chirp(if paused { 720.0 } else { 520.0 });
         spawn_local(async move {
             let _ = if paused {
                 resume_torrent(id).await
@@ -166,6 +201,7 @@ fn TorrentRow(id: u64) -> impl IntoView {
         });
     };
     let ask_cancel = move |_| {
+        chirp(440.0);
         state.confirm.set(Some(ConfirmData {
             id,
             name: name(),
@@ -173,6 +209,7 @@ fn TorrentRow(id: u64) -> impl IntoView {
         }));
     };
     let ask_delete = move |_| {
+        chirp(300.0);
         state.confirm.set(Some(ConfirmData {
             id,
             name: name(),
@@ -181,10 +218,19 @@ fn TorrentRow(id: u64) -> impl IntoView {
     };
 
     view! {
-        <div class="torrent-row panel">
+        <div
+            class="torrent-row panel"
+            class:completing=move || burst.get()
+            class:glitch=move || glitch.get()
+        >
+            {move || burst.get().then(|| view! {
+                <div class="completion-burst">"◤ COMPLETE ◥"</div>
+            })}
             <div class="tr-main">
                 <div class="tr-head">
-                    <span class="tr-name" title=name>{name}</span>
+                    <span class="tr-name" title=name>
+                        <Scramble text=Signal::derive(name)/>
+                    </span>
                     <span class=move || format!("badge badge-{}", st().label())>
                         {move || st().label()}
                     </span>
@@ -198,6 +244,8 @@ fn TorrentRow(id: u64) -> impl IntoView {
                     ></div>
                     <span class="progress-pct">{pct_text}</span>
                 </div>
+
+                <Bitfield progress=Signal::derive(progress) id=id/>
 
                 <div class="tr-stats">
                     <span class="stat down">"▼ " {down_text}</span>

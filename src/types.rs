@@ -59,6 +59,10 @@ pub struct StatsSnapshot {
     /// Server-recorded rolling (down_bps, up_bps) history for the global graph.
     #[serde(default)]
     pub global_hist: Vec<(f64, f64)>,
+    /// Increments each time a new history sample is appended (1 Hz). Lets the
+    /// client drive a smooth 1-second scroll animation on the graph.
+    #[serde(default)]
+    pub hist_tick: u64,
     pub torrents: Vec<TorrentView>,
 }
 

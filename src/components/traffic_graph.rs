@@ -6,13 +6,50 @@ use crate::types::fmt_speed;
 const W: f64 = 1000.0;
 const H: f64 = 220.0;
 
-/// Global up/down traffic graph: two filled areas with animated neon gradients,
-/// a rasterized CRT look, a left-to-right light pulse, and axis scale labels.
+/// Build (down_area, up_area, down_line, up_line) path strings.
+///
+/// Points span from x = -dx (an off-screen cushion on the left) to x = W, so the
+/// plot can be slid left by exactly one point-width without exposing a gap — that
+/// is how a new sample "scrolls in" smoothly from the right each second.
+fn geometry(hist: &[(f64, f64)]) -> (String, String, String, String) {
+    let n = hist.len();
+    if n < 3 {
+        return (String::new(), String::new(), String::new(), String::new());
+    }
+    let max = hist.iter().fold(1.0_f64, |m, (d, u)| m.max(*d).max(*u));
+    let dx = W / (n as f64 - 2.0);
+    let x = |i: usize| (i as f64 - 1.0) * dx;
+    let y = |v: f64| H - (v / max).clamp(0.0, 1.0) * (H - 8.0) - 4.0;
+
+    let line = |up: bool| {
+        hist.iter()
+            .enumerate()
+            .map(|(i, (d, u))| format!("{:.1},{:.1}", x(i), y(if up { *u } else { *d })))
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let area = |up: bool| {
+        let mut p = format!("M {:.1},{:.1} ", x(0), H);
+        for (i, (d, u)) in hist.iter().enumerate() {
+            p.push_str(&format!("L {:.1},{:.1} ", x(i), y(if up { *u } else { *d })));
+        }
+        p.push_str(&format!("L {:.1},{:.1} Z", x(n - 1), H));
+        p
+    };
+
+    (area(false), area(true), line(false), line(true))
+}
+
+/// Global up/down traffic graph. The history has a fixed, always-full time axis;
+/// new samples arrive once per second and the plot slides one step to the left.
 #[component]
 pub fn TrafficGraph() -> impl IntoView {
     let state = dashboard_state();
 
-    // Peak value in the current window — drives both the plot scale and the labels.
+    // 1 Hz trigger — the plot is re-rendered (and its CSS slide restarts) only
+    // when a new history sample lands, not on every 4 Hz snapshot.
+    let hist_tick = Memo::new(move |_| state.snapshot.get().hist_tick);
+
     let peak = move || {
         state
             .snapshot
@@ -22,49 +59,12 @@ pub fn TrafficGraph() -> impl IntoView {
             .fold(1.0_f64, |m, (d, u)| m.max(*d).max(*u))
     };
 
-    // Returns (down_area, up_area, down_line, up_line) SVG path/points strings.
-    let geometry = move || {
-        let hist: Vec<(f64, f64)> = state.snapshot.get().global_hist;
-        let n = hist.len();
-        if n < 2 {
-            return (String::new(), String::new(), String::new(), String::new());
-        }
-        let max = hist.iter().fold(1.0_f64, |m, (d, u)| m.max(*d).max(*u));
-        let dx = W / (n as f64 - 1.0);
-        let y_of = |v: f64| H - (v / max).clamp(0.0, 1.0) * (H - 8.0) - 4.0;
-
-        let line_pts = |up: bool| {
-            hist.iter()
-                .enumerate()
-                .map(|(i, (d, u))| {
-                    let v = if up { *u } else { *d };
-                    format!("{:.1},{:.1}", i as f64 * dx, y_of(v))
-                })
-                .collect::<Vec<_>>()
-                .join(" ")
-        };
-        let area_path = |up: bool| {
-            let mut p = format!("M 0,{H:.1} ");
-            for (i, (d, u)) in hist.iter().enumerate() {
-                let v = if up { *u } else { *d };
-                p.push_str(&format!("L {:.1},{:.1} ", i as f64 * dx, y_of(v)));
-            }
-            p.push_str(&format!("L {:.1},{H:.1} Z", (n as f64 - 1.0) * dx));
-            p
-        };
-
-        (area_path(false), area_path(true), line_pts(false), line_pts(true))
-    };
-
-    let down_area = move || geometry().0;
-    let up_area = move || geometry().1;
-    let down_line = move || geometry().2;
-    let up_line = move || geometry().3;
+    // Resting geometry for the pulse clip (updates reactively).
+    let clip_down = move || geometry(&state.snapshot.get().global_hist).0;
+    let clip_up = move || geometry(&state.snapshot.get().global_hist).1;
 
     let down_label = move || fmt_speed(state.snapshot.get().global_down_bps);
     let up_label = move || fmt_speed(state.snapshot.get().global_up_bps);
-
-    // Y-axis scale labels (top = peak, middle = peak/2, bottom = 0).
     let scale_top = move || fmt_speed(peak());
     let scale_mid = move || fmt_speed(peak() / 2.0);
 
@@ -94,29 +94,40 @@ pub fn TrafficGraph() -> impl IntoView {
                         <stop offset="0%" stop-color="#ff3b7b" stop-opacity="0.6"/>
                         <stop offset="100%" stop-color="#ff3b7b" stop-opacity="0.02"/>
                     </linearGradient>
-                    // pulse gradient: brightest at the leading (right) edge, trailing off behind
+                    // pulse gradient: brightest at the leading (right) edge
                     <linearGradient id="pulse-grad" x1="0" y1="0" x2="1" y2="0">
                         <stop offset="0%" stop-color="#c9fbff" stop-opacity="0"/>
                         <stop offset="78%" stop-color="#c9fbff" stop-opacity="0.12"/>
                         <stop offset="100%" stop-color="#ffffff" stop-opacity="0.72"/>
                     </linearGradient>
-                    // clip the pulse to the filled areas so only the graph brightens
                     <clipPath id="pulse-clip">
-                        <path d=down_area/>
-                        <path d=up_area/>
+                        <path d=clip_down/>
+                        <path d=clip_up/>
                     </clipPath>
                 </defs>
-                <path class="area area-down" d=down_area fill="url(#grad-down)"/>
-                <path class="area area-up" d=up_area fill="url(#grad-up)"/>
-                <polyline class="gline gline-down" points=down_line/>
-                <polyline class="gline gline-up" points=up_line/>
+
+                // The plot group is re-created each 1 Hz sample so its CSS slide
+                // animation restarts in sync with the data.
+                {move || {
+                    let _ = hist_tick.get();
+                    let hist = state.snapshot.get_untracked().global_hist;
+                    let (da, ua, dl, ul) = geometry(&hist);
+                    view! {
+                        <g class="graph-plot">
+                            <path class="area area-down" d=da fill="url(#grad-down)"/>
+                            <path class="area area-up" d=ua fill="url(#grad-up)"/>
+                            <polyline class="gline gline-down" points=dl/>
+                            <polyline class="gline gline-up" points=ul/>
+                        </g>
+                    }
+                }}
+
+                // left-to-right light pulse (own animation, not re-keyed)
                 <g class="graph-pulse-group" clip-path="url(#pulse-clip)">
                     <rect class="graph-pulse" x="0" y="0" width="320" height="220" fill="url(#pulse-grad)"/>
                 </g>
             </svg>
-            // travelling scan band for the CRT/dot-matrix effect
             <div class="crt-scan"></div>
-            // y-axis scale labels
             <div class="graph-scale">
                 <span>{scale_top}</span>
                 <span>{scale_mid}</span>

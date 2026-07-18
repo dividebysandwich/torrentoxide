@@ -1,7 +1,12 @@
 pub mod add_panel;
+pub mod bitfield;
+pub mod boot;
 pub mod confirm_modal;
 pub mod dashboard;
 pub mod dir_picker;
+pub mod fx;
+pub mod logticker;
+pub mod scramble;
 pub mod sparkline;
 pub mod torrent_list;
 pub mod traffic_graph;

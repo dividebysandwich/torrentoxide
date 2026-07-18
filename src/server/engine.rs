@@ -24,9 +24,14 @@ const MIB: f64 = 1024.0 * 1024.0;
 /// so they never collide with managed-torrent ids. Wire ids are `u64`.
 const PENDING_ID_BASE: u64 = 1u64 << 48;
 
-/// How many 1-second samples the global graph retains (~2 minutes).
+/// Snapshots are broadcast 4×/second (progress bar, bitfield, log ticker).
+const SAMPLE_INTERVAL: Duration = Duration::from_millis(250);
+/// The graph/sparkline history is only appended once per second, i.e. every Nth
+/// snapshot — that keeps their time resolution clear rather than a dense blur.
+const HISTORY_EVERY: u64 = 4;
+/// Samples the global graph retains (~2 minutes at 1 Hz history).
 const GLOBAL_HIST_LEN: usize = 120;
-/// How many 1-second samples each per-torrent sparkline retains.
+/// Samples each per-torrent sparkline retains (~48 seconds at 1 Hz history).
 const ROW_HIST_LEN: usize = 48;
 
 /// Rolling traffic history, recorded server-side so it survives client refreshes
@@ -81,27 +86,36 @@ impl Engine {
             .context("failed to start librqbit session")?;
         let api = Api::new(session, None);
 
+        // Pre-fill the global history so the graph shows a fixed, full-width time
+        // axis from the start (a flat line at zero) and new data scrolls in from
+        // the right — rather than starting zoomed-in and slowly filling.
+        let mut history = History::default();
+        history.global = vec![(0.0, 0.0); GLOBAL_HIST_LEN].into();
+
         let (tx, _rx) = watch::channel(Arc::new(StatsSnapshot::default()));
         let engine = Arc::new(Self {
             api,
             config,
             pending: Mutex::new(Vec::new()),
             next_pending: AtomicU64::new(0),
-            history: Mutex::new(History::default()),
+            history: Mutex::new(history),
             tx,
         });
 
-        // Sample stats + record history once per second, independent of any
-        // connected client, and broadcast the result to SSE subscribers.
+        // Sample + broadcast 4×/second (independent of any connected client);
+        // append to the graph/sparkline history only every HISTORY_EVERY ticks.
         let sampler = engine.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(Duration::from_secs(1));
+            let mut interval = tokio::time::interval(SAMPLE_INTERVAL);
+            let mut tick: u64 = 0;
             loop {
                 interval.tick().await;
-                let snapshot = sampler.sample_and_record();
+                let snapshot =
+                    sampler.sample_and_record(tick % HISTORY_EVERY == 0, tick / HISTORY_EVERY);
                 // `send_replace` always stores the value (even with zero subscribers),
                 // so a client connecting later immediately gets the full history.
                 let _ = sampler.tx.send_replace(Arc::new(snapshot));
+                tick = tick.wrapping_add(1);
             }
         });
 
@@ -256,9 +270,10 @@ impl Engine {
 
     // --- stats -------------------------------------------------------------
 
-    /// Sample current stats, fold them into the rolling history, and produce the
-    /// snapshot (with history embedded) that gets broadcast to clients.
-    fn sample_and_record(&self) -> StatsSnapshot {
+    /// Sample current stats and produce the snapshot (with history embedded).
+    /// `record_history` appends a new point to the graph/sparkline buffers; when
+    /// false, the current buffers are still attached but not extended.
+    fn sample_and_record(&self, record_history: bool, hist_tick: u64) -> StatsSnapshot {
         let list = self
             .api
             .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
@@ -286,15 +301,14 @@ impl Engine {
                 0.0
             };
 
-            let state = if stats.finished {
-                TorrentState::Finished
-            } else {
-                match stats.state {
-                    TorrentStatsState::Initializing => TorrentState::Initializing,
-                    TorrentStatsState::Live => TorrentState::Live,
-                    TorrentStatsState::Paused => TorrentState::Paused,
-                    TorrentStatsState::Error => TorrentState::Error,
-                }
+            // Paused/Error take priority over "finished" so a completed torrent
+            // can still be paused (stop seeding) and resumed.
+            let state = match stats.state {
+                TorrentStatsState::Paused => TorrentState::Paused,
+                TorrentStatsState::Error => TorrentState::Error,
+                _ if stats.finished => TorrentState::Finished,
+                TorrentStatsState::Initializing => TorrentState::Initializing,
+                TorrentStatsState::Live => TorrentState::Live,
             };
 
             let eta_secs = if down_bps > 1.0 && !stats.finished && stats.total_bytes >= stats.progress_bytes {
@@ -328,21 +342,37 @@ impl Engine {
         // into each view / the global series.
         let global_hist = {
             let mut hist = self.history.lock().unwrap();
-            hist.global.push_back((global_down, global_up));
-            while hist.global.len() > GLOBAL_HIST_LEN {
-                hist.global.pop_front();
+
+            if record_history {
+                hist.global.push_back((global_down, global_up));
+                while hist.global.len() > GLOBAL_HIST_LEN {
+                    hist.global.pop_front();
+                }
+                for (id, view) in reals.iter() {
+                    // pre-fill a new torrent's history so its sparkline is
+                    // full-width immediately (flat, data scrolls in from the right)
+                    let dq = hist
+                        .per_torrent
+                        .entry(*id)
+                        .or_insert_with(|| vec![(0.0, 0.0); ROW_HIST_LEN].into());
+                    dq.push_back((view.down_bps, view.up_bps));
+                    while dq.len() > ROW_HIST_LEN {
+                        dq.pop_front();
+                    }
+                }
+                let live: HashSet<usize> = reals.iter().map(|(id, _)| *id).collect();
+                hist.per_torrent.retain(|id, _| live.contains(id));
             }
 
-            let live: HashSet<usize> = reals.iter().map(|(id, _)| *id).collect();
+            // Always attach the current (1 Hz) history to each view, even on the
+            // 3-of-4 ticks where no new sample was appended.
             for (id, view) in reals.iter_mut() {
-                let dq = hist.per_torrent.entry(*id).or_default();
-                dq.push_back((view.down_bps, view.up_bps));
-                while dq.len() > ROW_HIST_LEN {
-                    dq.pop_front();
-                }
-                view.history = dq.iter().copied().collect();
+                view.history = hist
+                    .per_torrent
+                    .get(id)
+                    .map(|dq| dq.iter().copied().collect())
+                    .unwrap_or_default();
             }
-            hist.per_torrent.retain(|id, _| live.contains(id));
 
             hist.global.iter().copied().collect::<Vec<_>>()
         };
@@ -382,6 +412,7 @@ impl Engine {
             global_down_bps: global_down,
             global_up_bps: global_up,
             global_hist,
+            hist_tick,
             torrents,
         }
     }

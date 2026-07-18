@@ -12,19 +12,14 @@ A self-hostable web-driven BitTorrent client built in Rust with
 
 ## Features
 
-- **Live torrent list** — per-torrent progress bar, download/upload speeds, ETA, and a
-  dual-series (down/up) traffic **sparkline** per row.
-- **Global traffic graph** — animated pulsing-gradient area chart of aggregate up/down.
-- **Add torrents** by magnet link, `.torrent` file upload, or http(s) URL.
-- **Remote directory browser** — pick the save folder on the *server* (handy when the UI
-  runs on another machine), confined to a configurable root, with folder creation.
-- **Controls** — pause, resume, cancel (keep files), and cancel & delete files
-  (with a confirmation dialog).
+- **Cyberpunk aesthetic** - Torrent clients don't have to look like an office tool.
+- **No complex setup** - Just configure a folder for the downloads, run and visit the webpage.
+- **Simple operation** - Add torrents, pause/resume, remove, or delete both torrent and downloaded data.
+- **.torrent and Magnet support** - Just copy-paste a magnet link and press Download. Or upload a .torrent file, your choice.
+- **Ideal for running on your NAS** - Just point to your media folder and pick the right sub-folder for whether you're downloading a TV show, Movie, or anything else.
+- **Basic authentication support** - Protect access with a username/password in `.env`. Or don't, if you don't expose it to the outside.
 - **Live updates** over Server-Sent Events (no manual refresh).
-- **Optional auth** — a styled login page + signed session cookie, enabled only when
-  credentials are set in `.env`.
-- **Persistence** — torrents resume across restarts.
-- **Dark, responsive** neon/cyberpunk theme.
+- **Persistence** - torrents resume across restarts.
 
 ## Run with Docker (recommended)
 

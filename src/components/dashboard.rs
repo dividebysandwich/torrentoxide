@@ -6,6 +6,9 @@ use crate::components::add_panel::AddTorrentPanel;
 use crate::components::confirm_modal::ConfirmModal;
 use crate::components::torrent_list::TorrentList;
 use crate::components::traffic_graph::TrafficGraph;
+use crate::components::boot::BootSequence;
+use crate::components::logticker::LogTicker;
+use crate::components::scramble::{Scramble, ScrambleMode};
 use crate::components::DashboardState;
 use crate::types::fmt_bytes;
 
@@ -54,6 +57,7 @@ pub fn Dashboard() -> impl IntoView {
     let connected = move || state.connected.get();
 
     view! {
+        <BootSequence/>
         // decorative HUD frame + scattered technical readouts (non-interactive)
         <div class="hud-flair" aria-hidden="true">
             <div class="hud-data left">"SYS//NETRUNNER.v6\nPROTOCOL 6520-A44\nLINK: SECURE\n0x1F.4A.C2"</div>
@@ -72,15 +76,21 @@ pub fn Dashboard() -> impl IntoView {
                 <div class="topbar-stats">
                     <div class="tstat">
                         <span class="tstat-label">"DOWN"</span>
-                        <span class="tstat-val down">{total_down}</span>
+                        <span class="tstat-val down">
+                            <Scramble text=Signal::derive(total_down) mode=ScrambleMode::Roll/>
+                        </span>
                     </div>
                     <div class="tstat">
                         <span class="tstat-label">"UP"</span>
-                        <span class="tstat-val up">{total_up}</span>
+                        <span class="tstat-val up">
+                            <Scramble text=Signal::derive(total_up) mode=ScrambleMode::Roll/>
+                        </span>
                     </div>
                     <div class="tstat">
                         <span class="tstat-label">"ACTIVE"</span>
-                        <span class="tstat-val">{count}</span>
+                        <span class="tstat-val">
+                            <Scramble text=Signal::derive(count) mode=ScrambleMode::Roll/>
+                        </span>
                     </div>
                 </div>
                 <Show when=auth_on fallback=|| ()>
@@ -94,6 +104,7 @@ pub fn Dashboard() -> impl IntoView {
                 <TrafficGraph/>
                 <AddTorrentPanel/>
                 <TorrentList/>
+                <LogTicker/>
             </main>
 
             <ConfirmModal/>

@@ -3643,7 +3643,7 @@ dependencies = [
 
 [[package]]
 name = "torrentoxide"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -3655,6 +3655,7 @@ dependencies = [
  "futures",
  "gloo-net",
  "http",
+ "js-sys",
  "leptos",
  "leptos_axum",
  "leptos_meta",
