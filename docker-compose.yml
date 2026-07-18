@@ -1,0 +1,28 @@
+services:
+  torrentoxide:
+    build: .
+    image: torrentoxide:latest
+    container_name: torrentoxide
+    restart: unless-stopped
+
+    ports:
+      - "3000:3000" # web UI — browse to http://localhost:3000
+
+    volumes:
+      # Downloaded files (host path is configurable via DOWNLOADS_DIR in .env).
+      - "${DOWNLOADS_DIR:-./downloads}:/data/downloads"
+      # librqbit session state, so torrents resume across restarts.
+      - "${SESSION_DIR:-./data/session}:/data/.rqbit-session"
+
+    environment:
+      # --- optional authentication (set username + password to require login) ---
+      AUTH_USERNAME: "${AUTH_USERNAME:-}"
+      AUTH_PASSWORD: "${AUTH_PASSWORD:-}"
+      # Signs the session cookie — set a long random value when auth is enabled.
+      SESSION_SECRET: "${SESSION_SECRET:-}"
+      # --- logging ---
+      RUST_LOG: "${RUST_LOG:-info,librqbit=warn}"
+
+    # For the best peer connectivity you can instead run on the host network
+    # (Linux only) — comment out `ports:` above and uncomment:
+    # network_mode: host

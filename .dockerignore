@@ -1,0 +1,14 @@
+# Build artifacts and local runtime data — never send to the build context.
+target/
+target-front/
+downloads/
+data/
+.rqbit-session/
+
+# Local config / secrets
+.env
+
+# VCS + editor
+.git/
+.gitignore
+*.log

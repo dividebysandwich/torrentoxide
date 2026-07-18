@@ -26,16 +26,67 @@ A self-hostable web-driven BitTorrent client built in Rust with
 - **Persistence** — torrents resume across restarts.
 - **Dark, responsive** neon/cyberpunk theme.
 
-## Requirements
+## Run with Docker (recommended)
+
+The easiest way to self-host. Requires **Docker** with the **Compose** plugin.
+
+```sh
+git clone https://github.com/dividebysandwich/torrentoxide.git
+cd torrentoxide
+docker compose up -d --build
+```
+
+Then open <http://localhost:3000>.
+
+> The first build compiles the whole Rust app (several minutes). Later `docker compose up -d`
+> starts instantly.
+
+What the compose setup does:
+
+- Builds a small multi-stage image from the `Dockerfile`.
+- Publishes the web UI on port **3000**.
+- Mounts two host directories so your data survives container rebuilds:
+  - `./downloads` → `/data/downloads` — your files (also the directory-browser root)
+  - `./data/session` → `/data/.rqbit-session` — resume state
+
+### Enable authentication (optional)
+
+Create a `.env` file next to `docker-compose.yml` (Compose reads it automatically):
+
+```sh
+AUTH_USERNAME=admin
+AUTH_PASSWORD=change-me
+SESSION_SECRET=$(openssl rand -hex 32)
+```
+
+Restart with `docker compose up -d`. Leave these blank (or omit the file) for no auth.
+
+### Everyday commands
+
+```sh
+docker compose logs -f          # follow logs
+docker compose down             # stop and remove the container
+docker compose up -d --build    # rebuild after pulling new code
+```
+
+### Customization
+
+- **Paths / port** — set `DOWNLOADS_DIR` and `SESSION_DIR` in `.env` to relocate the host
+  volumes; edit the `ports:` mapping (e.g. `8080:3000`) to change the published port.
+- **Peer connectivity** — outbound connections + DHT work out of the box. On Linux, for the
+  best connectivity uncomment `network_mode: host` in `docker-compose.yml` (and drop the
+  `ports:` mapping).
+
+> **No buildx?** `docker compose build` needs the BuildKit/buildx plugin (bundled with
+> standard Docker installs). If it's missing, build with the classic builder instead:
+> `DOCKER_BUILDKIT=0 docker build -t torrentoxide:latest .` then `docker compose up -d`.
+
+## Run from source
 
 ```sh
 rustup target add wasm32-unknown-unknown
 cargo install cargo-leptos
-```
 
-## Run
-
-```sh
 cp .env.example .env      # optional — sensible defaults apply without it
 cargo leptos watch        # dev, with auto-reload
 # or
@@ -44,11 +95,12 @@ cargo leptos serve        # build once and serve
 
 Then open <http://127.0.0.1:3000>.
 
-For a production build:
+For a standalone production binary:
 
 ```sh
 cargo leptos build --release
-# run the produced ./target/release/torrentoxide binary with LEPTOS_SITE_* env vars set
+# run ./target/release/torrentoxide with LEPTOS_SITE_* env vars set
+# (see the Dockerfile for the exact variables)
 ```
 
 ## Configuration (`.env`)
@@ -62,6 +114,9 @@ cargo leptos build --release
 | `AUTH_USERNAME`     | *(unset)*          | Set together with `AUTH_PASSWORD` to require login.            |
 | `AUTH_PASSWORD`     | *(unset)*          | Auth is **disabled** unless both are set.                      |
 | `SESSION_SECRET`    | *(random)*         | Signs session cookies; set a long random value in production.  |
+
+> In Docker these default to `/data/downloads` and `/data/.rqbit-session` (set by the image);
+> you normally only set `AUTH_USERNAME`, `AUTH_PASSWORD`, and `SESSION_SECRET` via `.env`.
 
 
 ## Security notes
