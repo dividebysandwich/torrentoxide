@@ -62,7 +62,11 @@ jobs:
 
       - name: Install cargo-leptos
         shell: bash
-        run: cargo binstall -y cargo-leptos@0.3.2
+        # --force so a stale "already installed" entry in cached ~/.cargo metadata
+        # can't skip the install and leave the binary missing; then verify it runs.
+        run: |
+          cargo binstall -y --force cargo-leptos@0.3.2
+          cargo leptos --version
 
       - name: Build (release)
         run: cargo leptos build --release
