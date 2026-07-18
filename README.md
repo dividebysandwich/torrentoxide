@@ -8,6 +8,8 @@ A self-hostable web-driven BitTorrent client built in Rust with
 
 <img width="995" height="716" alt="image" src="https://github.com/user-attachments/assets/d095c6a3-3173-49bc-9105-7f6fce474195" />
 
+<img width="651" height="515" alt="image" src="https://github.com/user-attachments/assets/f0003ecb-9fd9-4536-88d0-d2b777e67266" />
+
 ## Features
 
 - **Live torrent list** — per-torrent progress bar, download/upload speeds, ETA, and a
