@@ -57,16 +57,12 @@ jobs:
         with:
           key: ${{ matrix.rid }}
 
-      - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
-
+      # Prebuilt binaries for every target (incl. aarch64-linux) — never compiles
+      # from source, so no openssl-sys/perl issues and no stale-cache skip.
       - name: Install cargo-leptos
-        shell: bash
-        # --force so a stale "already installed" entry in cached ~/.cargo metadata
-        # can't skip the install and leave the binary missing; then verify it runs.
-        run: |
-          cargo binstall -y --force cargo-leptos@0.3.2
-          cargo leptos --version
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-leptos@0.3.2
 
       - name: Build (release)
         run: cargo leptos build --release
