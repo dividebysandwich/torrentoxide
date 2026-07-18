@@ -81,6 +81,38 @@ docker compose up -d --build    # rebuild after pulling new code
 > standard Docker installs). If it's missing, build with the classic builder instead:
 > `DOCKER_BUILDKIT=0 docker build -t torrentoxide:latest .` then `docker compose up -d`.
 
+## Arch Linux
+
+Install paru, if you haven't already:
+
+```sh
+sudo pacman -S --needed base-devel
+git clone https://aur.archlinux.org/paru.git
+cd paru
+makepkg -si
+```
+
+You can also use yay instead of paru, if you prefer:
+
+```sh
+sudo pacman -S --needed base-devel git
+git clone https://aur.archlinux.org/yay.git
+cd yay
+makepkg -si
+```
+
+Then install torrentoxide:
+
+```sh
+paru -S torrentoxide
+```
+
+or
+
+```sh
+yay -S torrentoxide
+```
+
 ## Prebuilt downloads
 
 | Platform | Artifacts |
