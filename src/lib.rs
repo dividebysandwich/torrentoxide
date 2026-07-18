@@ -1,3 +1,7 @@
+// The Leptos `view!` macros nest deeply enough (esp. the SVG traffic graph) to
+// exceed the default type-recursion limit of 128.
+#![recursion_limit = "512"]
+
 pub mod api;
 pub mod app;
 pub mod components;
