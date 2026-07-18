@@ -105,6 +105,58 @@ pub struct DirListing {
     pub entries: Vec<DirEntry>,
 }
 
+/// Full inspector view of one torrent (files, swarm, trackers, DHT), fetched
+/// on demand when the detail modal is open.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct TorrentDetail {
+    pub id: u64,
+    pub name: String,
+    pub output_folder: String,
+    pub total_bytes: u64,
+    pub downloaded_bytes: u64,
+    pub uploaded_bytes: u64,
+    /// 0.0 ..= 1.0
+    pub progress: f32,
+    pub files: Vec<FileEntry>,
+    pub peers: PeerCounts,
+    pub trackers: Vec<TrackerInfo>,
+    /// Size of the DHT routing table (rough "known nodes" count).
+    pub dht_nodes: u64,
+    /// Whether DHT is enabled at all (false → the node count is meaningless).
+    pub dht_enabled: bool,
+}
+
+/// A single file within a torrent, with its path components for tree building.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FileEntry {
+    pub index: usize,
+    /// Path components, e.g. `["Season 1", "ep01.mkv"]`.
+    pub components: Vec<String>,
+    pub length: u64,
+    pub have_bytes: u64,
+    /// Whether this file is currently selected for download.
+    pub included: bool,
+}
+
+/// Aggregate peer-swarm counts (librqbit does not expose per-peer detail publicly).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+pub struct PeerCounts {
+    pub live: u64,
+    pub connecting: u64,
+    pub queued: u64,
+    pub seen: u64,
+    pub dead: u64,
+}
+
+/// A tracker configured for a torrent.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TrackerInfo {
+    pub url: String,
+    /// Protocol scheme (udp / http / https / wss), upper-cased for the badge.
+    pub scheme: String,
+    pub host: String,
+}
+
 /// Default paths surfaced to the UI (from the server's `.env`).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Defaults {

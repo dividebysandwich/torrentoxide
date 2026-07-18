@@ -216,12 +216,18 @@ fn TorrentRow(id: u64) -> impl IntoView {
             delete_files: true,
         }));
     };
+    // Clicking anywhere on the row (outside the action buttons) opens the inspector.
+    let open_detail = move |_| {
+        chirp(640.0);
+        state.detail_id.set(Some(id));
+    };
 
     view! {
         <div
-            class="torrent-row panel"
+            class="torrent-row panel row-clickable"
             class:completing=move || burst.get()
             class:glitch=move || glitch.get()
+            on:click=open_detail
         >
             {move || burst.get().then(|| view! {
                 <div class="completion-burst">"◤ COMPLETE ◥"</div>
@@ -260,7 +266,7 @@ fn TorrentRow(id: u64) -> impl IntoView {
 
             <div class="tr-side">
                 <Sparkline points=Signal::derive(history)/>
-                <div class="tr-actions">
+                <div class="tr-actions" on:click=|e| e.stop_propagation()>
                     <button
                         class="icon-btn"
                         title=move || if is_paused() { "Resume" } else { "Pause" }

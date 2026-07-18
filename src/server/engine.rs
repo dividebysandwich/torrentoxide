@@ -18,7 +18,10 @@ use librqbit::{
 use tokio::sync::watch;
 
 use crate::server::config::AppConfig;
-use crate::types::{DirEntry, DirListing, Settings, StatsSnapshot, TorrentState, TorrentView};
+use crate::types::{
+    DirEntry, DirListing, FileEntry, PeerCounts, Settings, StatsSnapshot, TorrentDetail,
+    TorrentState, TorrentView, TrackerInfo,
+};
 
 /// Convert a KiB/s limit (`0` = unlimited) into librqbit's bytes-per-second cap.
 fn kbps_to_nz(kbps: u32) -> Option<NonZeroU32> {
@@ -174,6 +177,103 @@ impl Engine {
 
         *self.settings.lock().unwrap() = new.clone();
         save_settings(&self.settings_path, &new)
+    }
+
+    // --- torrent detail (inspector) ----------------------------------------
+
+    /// Full inspector view for one torrent: file list (with per-file progress),
+    /// aggregate peer swarm, configured trackers, and DHT node count.
+    pub fn detail(&self, id: u64) -> anyhow::Result<TorrentDetail> {
+        let idx = TorrentIdOrHash::Id(id as usize);
+        let details = self
+            .api
+            .api_torrent_details(idx)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let stats = self
+            .api
+            .api_stats_v1(idx)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+
+        // Files with per-file downloaded bytes (aligned by index with file_progress).
+        let file_progress = &stats.file_progress;
+        let files: Vec<FileEntry> = details
+            .files
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| FileEntry {
+                index: i,
+                components: f.components,
+                length: f.length,
+                have_bytes: file_progress.get(i).copied().unwrap_or(0),
+                included: f.included,
+            })
+            .collect();
+
+        // Aggregate peer swarm — only populated while the torrent is live.
+        let peers = stats
+            .live
+            .as_ref()
+            .map(|l| {
+                let p = &l.snapshot.peer_stats;
+                PeerCounts {
+                    live: p.live as u64,
+                    connecting: p.connecting as u64,
+                    queued: p.queued as u64,
+                    seen: p.seen as u64,
+                    dead: p.dead as u64,
+                }
+            })
+            .unwrap_or_default();
+
+        // Configured trackers. librqbit 8.1 exposes the tracker URL set but not
+        // per-tracker announce health, so we surface the scheme/host for the HUD.
+        let trackers: Vec<TrackerInfo> = self
+            .api
+            .mgr_handle(idx)
+            .map(|h| {
+                let mut ts: Vec<TrackerInfo> = h
+                    .shared()
+                    .trackers
+                    .iter()
+                    .map(|u| TrackerInfo {
+                        scheme: u.scheme().to_uppercase(),
+                        host: u.host_str().unwrap_or("").to_string(),
+                        url: u.to_string(),
+                    })
+                    .collect();
+                ts.sort_by(|a, b| a.url.cmp(&b.url));
+                ts
+            })
+            .unwrap_or_default();
+
+        // DHT routing table size (rough count of known nodes).
+        let (dht_nodes, dht_enabled) = match self.api.api_dht_stats() {
+            Ok(d) => (d.routing_table_size as u64, true),
+            Err(_) => (0, false),
+        };
+
+        let total = stats.total_bytes;
+        let progress = if total > 0 {
+            (stats.progress_bytes as f64 / total as f64) as f32
+        } else {
+            0.0
+        };
+
+        Ok(TorrentDetail {
+            id,
+            name: details.name.unwrap_or_default(),
+            output_folder: details.output_folder,
+            total_bytes: total,
+            downloaded_bytes: stats.progress_bytes,
+            uploaded_bytes: stats.uploaded_bytes,
+            progress,
+            files,
+            peers,
+            trackers,
+            dht_nodes,
+            dht_enabled,
+        })
     }
 
     // --- adding torrents ---------------------------------------------------

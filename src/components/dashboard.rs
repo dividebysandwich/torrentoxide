@@ -5,6 +5,7 @@ use crate::api::get_defaults;
 use crate::components::add_panel::AddTorrentPanel;
 use crate::components::confirm_modal::ConfirmModal;
 use crate::components::control_deck::ControlDeck;
+use crate::components::detail_modal::DetailModal;
 use crate::components::torrent_list::TorrentList;
 use crate::components::traffic_graph::TrafficGraph;
 use crate::components::boot::BootSequence;
@@ -110,6 +111,7 @@ pub fn Dashboard() -> impl IntoView {
             </main>
 
             <ConfirmModal/>
+            <DetailModal/>
         </div>
     }
 }

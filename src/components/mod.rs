@@ -4,7 +4,9 @@ pub mod boot;
 pub mod confirm_modal;
 pub mod control_deck;
 pub mod dashboard;
+pub mod detail_modal;
 pub mod dir_picker;
+pub mod file_tree;
 pub mod fx;
 pub mod logticker;
 pub mod scramble;
@@ -39,6 +41,8 @@ pub struct DashboardState {
     pub connected: RwSignal<bool>,
     /// Destructive action pending user confirmation, if any.
     pub confirm: RwSignal<Option<ConfirmData>>,
+    /// Id of the torrent whose detail inspector is open, if any.
+    pub detail_id: RwSignal<Option<u64>>,
 }
 
 impl Default for DashboardState {
@@ -54,6 +58,7 @@ impl DashboardState {
             defaults: RwSignal::new(Defaults::default()),
             connected: RwSignal::new(false),
             confirm: RwSignal::new(None),
+            detail_id: RwSignal::new(None),
         }
     }
 

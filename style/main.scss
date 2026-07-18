@@ -1080,6 +1080,306 @@ code {
   letter-spacing: 2px;
 }
 
+// ---- torrent detail inspector ------------------------------------------
+
+.row-clickable {
+  cursor: pointer;
+}
+
+.detail-modal {
+  width: min(96vw, 780px);
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.detail-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 0.6rem;
+  .modal-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+.detail-loading {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--yellow);
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  margin-bottom: 0.7rem;
+}
+.detail-path {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.4rem 0 0.9rem;
+  code {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    white-space: nowrap;
+    background: rgba(4, 8, 14, 0.85);
+    border: 1px solid rgba(36, 227, 255, 0.25);
+    padding: 0.35rem 0.6rem;
+    color: var(--cyan);
+    font-size: 0.8rem;
+    @include cut(6px);
+  }
+}
+.detail-overview {
+  margin-bottom: 1rem;
+}
+.detail-stats {
+  display: flex;
+  gap: 1.3rem;
+  flex-wrap: wrap;
+  margin-top: 0.55rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.5px;
+  color: var(--ink-dim);
+  b {
+    color: var(--yellow);
+  }
+}
+.detail-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 0.9rem;
+  margin-bottom: 0.9rem;
+}
+.detail-card {
+  @include framed(10px, 1.5px, var(--graph-bg), rgba(36, 227, 255, 0.3), var(--glow-cyan));
+  padding: 0.7rem 0.9rem;
+}
+.detail-card-title {
+  display: block;
+  @include tag-label;
+  margin-bottom: 0.55rem;
+  color: var(--cyan);
+}
+
+// peer swarm
+.swarm-field {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 46px;
+  align-content: flex-start;
+  margin-bottom: 0.6rem;
+}
+.swarm-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  &.live {
+    background: var(--cyan);
+    box-shadow: 0 0 6px var(--glow-cyan);
+    animation: swarm-pulse 2.4s ease-in-out infinite;
+  }
+  &.conn {
+    background: transparent;
+    border: 1px solid var(--yellow);
+    animation: blink 1.1s steps(2) infinite;
+  }
+}
+.swarm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1rem;
+  font-size: 0.72rem;
+  letter-spacing: 0.5px;
+  .sw {
+    color: var(--ink-dim);
+    b {
+      color: var(--ink);
+    }
+    &.live {
+      color: var(--cyan);
+      b { color: var(--cyan-bright); }
+    }
+    &.conn b { color: var(--yellow); }
+    &.dead b { color: var(--red); }
+  }
+}
+
+// dht gauge
+.dht-card {
+  display: flex;
+  flex-direction: column;
+}
+.dht-count {
+  font-size: 2.4rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--cyan);
+  text-shadow: 0 0 14px var(--glow-cyan);
+  margin: 0.2rem 0 0.3rem;
+  &.off {
+    color: var(--ink-dim);
+    text-shadow: none;
+  }
+}
+.dht-status {
+  font-size: 0.66rem;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  &.on {
+    color: var(--green);
+  }
+}
+
+// trackers
+.tracker-card {
+  margin-bottom: 0.9rem;
+}
+.tracker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-height: 140px;
+  overflow-y: auto;
+}
+.tracker {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.82rem;
+}
+.tk-scheme {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid currentColor;
+  color: var(--ink-dim);
+  @include cut(4px);
+  &.s-udp { color: var(--yellow); }
+  &.s-http { color: var(--cyan); }
+  &.s-https { color: var(--green); }
+  &.s-wss { color: var(--up); }
+}
+.tk-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.tk-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-dim);
+  flex: none;
+  &.active {
+    background: var(--green);
+    box-shadow: 0 0 7px rgba(53, 255, 134, 0.6);
+    animation: swarm-pulse 2s ease-in-out infinite;
+  }
+}
+
+// file tree
+.files-card {
+  margin-bottom: 0.2rem;
+}
+.file-tree {
+  max-height: 260px;
+  overflow-y: auto;
+  font-size: 0.85rem;
+}
+.tree-dir {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
+  color: var(--ink-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-size: 0.76rem;
+}
+.tree-caret {
+  color: var(--red);
+}
+.tree-dir-name {
+  color: var(--ink);
+}
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding-top: 0.18rem;
+  padding-bottom: 0.18rem;
+  cursor: pointer;
+  &.excluded {
+    opacity: 0.4;
+  }
+  &:hover {
+    background: rgba(36, 227, 255, 0.05);
+  }
+}
+.tree-check {
+  accent-color: var(--cyan);
+  flex: none;
+}
+.tree-file-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+.tree-file-bar {
+  flex: 0 0 70px;
+  height: 5px;
+  background: rgba(4, 8, 14, 0.9);
+  border: 1px solid rgba(36, 227, 255, 0.2);
+  overflow: hidden;
+  @include cut(2px);
+}
+.tree-file-fill {
+  display: block;
+  height: 100%;
+  background: var(--cyan);
+  box-shadow: 0 0 6px -1px var(--glow-cyan);
+  &.complete {
+    background: var(--green);
+  }
+}
+.tree-file-size {
+  flex: 0 0 66px;
+  text-align: right;
+  color: var(--ink-dim);
+  font-size: 0.76rem;
+}
+.tree-empty {
+  color: var(--ink-dim);
+  font-size: 0.82rem;
+  letter-spacing: 1px;
+  padding: 0.4rem 0;
+}
+
+@keyframes swarm-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
 // ---- animations --------------------------------------------------------
 
 @keyframes shimmer {
@@ -1410,6 +1710,12 @@ code {
     width: 100%;
     justify-content: space-between;
     margin-left: 0;
+  }
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+  .control-deck {
+    gap: 0.9rem;
   }
   .torrent-row {
     flex-direction: column;

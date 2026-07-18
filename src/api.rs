@@ -3,7 +3,7 @@
 
 use leptos::prelude::*;
 
-use crate::types::{AddRequest, Defaults, DirListing, Settings, TorrentView};
+use crate::types::{AddRequest, Defaults, DirListing, Settings, TorrentDetail, TorrentView};
 
 #[server]
 pub async fn add_torrent(req: AddRequest) -> Result<(), ServerFnError> {
@@ -110,6 +110,16 @@ pub async fn list_torrents() -> Result<Vec<TorrentView>, ServerFnError> {
     use crate::server::AppState;
     let state = expect_context::<AppState>();
     Ok(state.engine.current().torrents.clone())
+}
+
+#[server]
+pub async fn get_torrent_detail(id: u64) -> Result<TorrentDetail, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .engine
+        .detail(id)
+        .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
 #[server]
