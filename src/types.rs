@@ -171,6 +171,9 @@ pub struct AddRequest {
     pub source: String,
     pub output_dir: String,
     pub paused: bool,
+    /// Indices of files to download; `None` = all files.
+    #[serde(default)]
+    pub only_files: Option<Vec<usize>>,
 }
 
 /// Human-readable byte-rate formatting (e.g. `1.4 MB/s`), shared by UI + labels.

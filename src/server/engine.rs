@@ -286,6 +286,7 @@ impl Engine {
         source: String,
         output_dir: String,
         paused: bool,
+        only_files: Option<Vec<usize>>,
     ) -> anyhow::Result<()> {
         let source = source.trim().to_string();
         if source.is_empty() {
@@ -302,6 +303,7 @@ impl Engine {
                 output_folder: Some(dir),
                 paused,
                 overwrite: true,
+                only_files,
                 ..Default::default()
             };
             let outcome = match tokio::time::timeout(
@@ -326,6 +328,7 @@ impl Engine {
         bytes: Vec<u8>,
         output_dir: String,
         paused: bool,
+        only_files: Option<Vec<usize>>,
     ) -> anyhow::Result<()> {
         let dir = self.confine(&output_dir)?;
         std::fs::create_dir_all(&dir).ok();
@@ -333,6 +336,7 @@ impl Engine {
             output_folder: Some(dir.to_string_lossy().into_owned()),
             paused,
             overwrite: true,
+            only_files,
             ..Default::default()
         };
         tokio::time::timeout(
@@ -343,6 +347,49 @@ impl Engine {
         .context("timed out while adding torrent")?
         .map_err(|e| anyhow::anyhow!("{e}"))?;
         Ok(())
+    }
+
+    /// List a magnet/URL torrent's files WITHOUT adding it, so the user can
+    /// choose which files to download before the transfer starts.
+    pub async fn probe_url(
+        &self,
+        source: String,
+        output_dir: String,
+    ) -> anyhow::Result<Vec<FileEntry>> {
+        let dir = self.confine(&output_dir)?;
+        let opts = AddTorrentOptions {
+            output_folder: Some(dir.to_string_lossy().into_owned()),
+            list_only: true,
+            ..Default::default()
+        };
+        let resp = tokio::time::timeout(
+            RESOLVE_TIMEOUT,
+            self.api.api_add_torrent(AddTorrent::from_url(source.trim()), Some(opts)),
+        )
+        .await
+        .context("timed out fetching metadata from peers")?
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(files_from_details(resp.details.files))
+    }
+
+    /// Same as [`Self::probe_url`] but for uploaded `.torrent` bytes.
+    pub async fn probe_bytes(
+        &self,
+        bytes: Vec<u8>,
+        output_dir: String,
+    ) -> anyhow::Result<Vec<FileEntry>> {
+        let dir = self.confine(&output_dir)?;
+        let opts = AddTorrentOptions {
+            output_folder: Some(dir.to_string_lossy().into_owned()),
+            list_only: true,
+            ..Default::default()
+        };
+        let resp = self
+            .api
+            .api_add_torrent(AddTorrent::from_bytes(bytes), Some(opts))
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(files_from_details(resp.details.files))
     }
 
     fn push_pending(&self, label: String, output_dir: String) -> u64 {
@@ -657,6 +704,25 @@ impl Engine {
         }
         Ok(full)
     }
+}
+
+/// Map librqbit's `list_only` file details into our wire `FileEntry` list.
+/// `list_only` responses carry no progress, so `have_bytes` is 0.
+fn files_from_details(
+    files: Option<Vec<librqbit::api::TorrentDetailsResponseFile>>,
+) -> Vec<FileEntry> {
+    files
+        .unwrap_or_default()
+        .into_iter()
+        .enumerate()
+        .map(|(i, f)| FileEntry {
+            index: i,
+            components: f.components,
+            length: f.length,
+            have_bytes: 0,
+            included: f.included,
+        })
+        .collect()
 }
 
 /// Load persisted settings; fall back to defaults if the file is missing or invalid.

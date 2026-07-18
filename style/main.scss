@@ -1380,6 +1380,24 @@ code {
   }
 }
 
+// ---- add: file selection modal -----------------------------------------
+
+.fsel-modal {
+  width: min(96vw, 720px);
+  max-height: 86vh;
+  display: flex;
+  flex-direction: column;
+  .file-tree {
+    flex: 1 1 auto;
+    max-height: 48vh;
+  }
+}
+.fsel-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  margin: 0.2rem 0 0.6rem;
+}
+
 // ---- animations --------------------------------------------------------
 
 @keyframes shimmer {

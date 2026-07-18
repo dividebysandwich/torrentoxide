@@ -17,7 +17,12 @@ async fn main() {
     use torrentoxide::app::{shell, App};
     use torrentoxide::server::config::AppConfig;
     use torrentoxide::server::engine::Engine;
-    use torrentoxide::server::{auth, events::sse_handler, upload::upload_handler, AppState};
+    use torrentoxide::server::{
+        auth,
+        events::sse_handler,
+        upload::{probe_handler, upload_handler},
+        AppState,
+    };
 
     dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
@@ -79,6 +84,10 @@ async fn main() {
         .route(
             "/api/upload",
             post(upload_handler).layer(DefaultBodyLimit::max(26 * 1024 * 1024)),
+        )
+        .route(
+            "/api/probe",
+            post(probe_handler).layer(DefaultBodyLimit::max(26 * 1024 * 1024)),
         )
         .route("/login", get(auth::login_page).post(auth::login_submit))
         .route("/logout", post(auth::logout))

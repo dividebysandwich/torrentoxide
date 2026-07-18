@@ -1,3 +1,4 @@
+pub mod add_file_select;
 pub mod add_panel;
 pub mod bitfield;
 pub mod boot;

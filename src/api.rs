@@ -3,7 +3,9 @@
 
 use leptos::prelude::*;
 
-use crate::types::{AddRequest, Defaults, DirListing, Settings, TorrentDetail, TorrentView};
+use crate::types::{
+    AddRequest, Defaults, DirListing, FileEntry, Settings, TorrentDetail, TorrentView,
+};
 
 #[server]
 pub async fn add_torrent(req: AddRequest) -> Result<(), ServerFnError> {
@@ -13,9 +15,21 @@ pub async fn add_torrent(req: AddRequest) -> Result<(), ServerFnError> {
     // background, and surfaces progress/errors via the live stats stream.
     state
         .engine
-        .spawn_add_url(req.source, req.output_dir, req.paused)
+        .spawn_add_url(req.source, req.output_dir, req.paused, req.only_files)
         .map_err(|e| ServerFnError::new(e.to_string()))?;
     Ok(())
+}
+
+/// List a magnet/URL torrent's files without adding it, for the file picker.
+#[server]
+pub async fn probe_url(source: String, output_dir: String) -> Result<Vec<FileEntry>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .engine
+        .probe_url(source, output_dir)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
 #[server]
