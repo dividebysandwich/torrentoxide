@@ -6,6 +6,8 @@ A self-hostable web-driven BitTorrent client built in Rust with
 
 ![stack](https://img.shields.io/badge/rust-leptos%200.8-orange) ![engine](https://img.shields.io/badge/engine-librqbit%208-blueviolet)
 
+<img width="995" height="716" alt="image" src="https://github.com/user-attachments/assets/d095c6a3-3173-49bc-9105-7f6fce474195" />
+
 ## Features
 
 - **Live torrent list** — per-torrent progress bar, download/upload speeds, ETA, and a
