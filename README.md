@@ -81,6 +81,28 @@ docker compose up -d --build    # rebuild after pulling new code
 > standard Docker installs). If it's missing, build with the classic builder instead:
 > `DOCKER_BUILDKIT=0 docker build -t torrentoxide:latest .` then `docker compose up -d`.
 
+## Prebuilt downloads
+
+| Platform | Artifacts |
+| --- | --- |
+| **Windows** (x86_64) | `.zip` (portable) · `.msi` (installer + Start Menu shortcut) |
+| **Linux** (x86_64) | `.tar.gz` (portable) · `.deb` (installs a `systemd` service) |
+| **macOS** (Intel + Apple Silicon) | `.tar.gz` (portable) |
+
+Each package bundles the server binary **and** its `site/` web assets; the binary
+locates them next to itself, so the portable archives just need extract + run:
+
+```sh
+# Linux / macOS
+tar xzf torrentoxide-<version>-<platform>.tar.gz
+cd torrentoxide-<version>-<platform> && ./run.sh      # → http://127.0.0.1:3000
+```
+
+On Windows, unzip and run `run.bat` (or install the `.msi` and launch **TorrentOxide**
+from the Start Menu). The `.deb` installs a service — start it with
+`sudo systemctl enable --now torrentoxide` and configure it via
+`/etc/torrentoxide/torrentoxide.env`.
+
 ## Run from source
 
 ```sh

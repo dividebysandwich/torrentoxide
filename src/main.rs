@@ -32,7 +32,25 @@ async fn main() {
 
     // Leptos options come from cargo-leptos env vars (LEPTOS_SITE_ADDR etc.).
     let conf = get_configuration(None).expect("failed to read leptos configuration");
-    let leptos_options = conf.leptos_options;
+    let mut leptos_options = conf.leptos_options;
+
+    // For packaged/standalone builds (archives, .deb, .msi) the leptos env vars
+    // aren't set, so pin the values that are fixed for this app and self-locate
+    // the `site/` assets next to the executable.
+    if std::env::var_os("LEPTOS_OUTPUT_NAME").is_none() {
+        // Otherwise leptos defaults this to "leptos_config" → wrong /pkg/*.js name.
+        leptos_options.output_name = "torrentoxide".into();
+    }
+    if std::env::var_os("LEPTOS_SITE_ROOT").is_none() {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(candidate) = exe.parent().map(|d| d.join("site")) {
+                if candidate.is_dir() {
+                    leptos_options.site_root = candidate.to_string_lossy().into_owned().into();
+                }
+            }
+        }
+    }
+
     let addr = leptos_options.site_addr;
 
     let key = match &config.session_secret {

@@ -1,0 +1,155 @@
+name: release
+
+# Builds standalone packages for Windows (zip + MSI), Linux (tar.gz + deb) and
+# macOS (tar.gz, Intel + Apple Silicon) and attaches them to the GitHub release.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for a manual build (e.g. v0.1.0)"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+            rid: linux-x86_64
+            target: x86_64-unknown-linux-gnu
+            ext: ""
+          - os: windows-latest
+            rid: windows-x86_64
+            target: x86_64-pc-windows-msvc
+            ext: ".exe"
+          - os: macos-13
+            rid: macos-x86_64
+            target: x86_64-apple-darwin
+            ext: ""
+          - os: macos-14
+            rid: macos-arm64
+            target: aarch64-apple-darwin
+            ext: ""
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.rid }}
+
+      - name: Install cargo-leptos
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-leptos
+
+      - name: Build (release)
+        run: cargo leptos build --release
+
+      - name: Determine version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            V="${{ github.event.release.tag_name }}"
+          else
+            V="${{ github.event.inputs.version }}"
+            [ -z "$V" ] && V="${{ github.ref_name }}"
+          fi
+          V="${V#v}"
+          [ -z "$V" ] && V="0.0.0"
+          echo "VERSION=$V" >> "$GITHUB_ENV"
+          # MSI requires a strictly numeric x.y.z version
+          NUM=$(printf '%s' "$V" | grep -oE '^[0-9]+(\.[0-9]+){0,2}' || true)
+          [ -z "$NUM" ] && NUM="0.0.0"
+          echo "MSI_VERSION=$NUM" >> "$GITHUB_ENV"
+
+      - name: Stage package folder
+        shell: bash
+        run: |
+          NAME="torrentoxide-${VERSION}-${{ matrix.rid }}"
+          STAGE="dist/$NAME"
+          echo "PKG_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "STAGE=$STAGE" >> "$GITHUB_ENV"
+          mkdir -p "$STAGE/site"
+          cp "target/release/torrentoxide${{ matrix.ext }}" "$STAGE/"
+          cp -r target/site/. "$STAGE/site/"
+          cp .env.example "$STAGE/" || true
+          cp README.md "$STAGE/" || true
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp packaging/run.bat "$STAGE/"
+          else
+            cp packaging/run.sh "$STAGE/"
+            chmod +x "$STAGE/run.sh" "$STAGE/torrentoxide"
+          fi
+
+      # ---- archives ----
+      - name: Package tar.gz (Linux/macOS)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: tar -C dist -czf "dist/${PKG_NAME}.tar.gz" "${PKG_NAME}"
+
+      - name: Package zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path "dist/$env:PKG_NAME" -DestinationPath "dist/$env:PKG_NAME.zip"
+
+      # ---- Linux .deb ----
+      - name: Build .deb
+        if: matrix.rid == 'linux-x86_64'
+        shell: bash
+        run: bash packaging/build-deb.sh "$VERSION"
+
+      # ---- Windows .msi (WiX v3: heat -> candle -> light) ----
+      - name: Build .msi
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install wixtoolset --no-progress -y
+          $wixRoot = Get-ChildItem "C:\Program Files (x86)" -Directory -Filter "WiX Toolset*" `
+            -ErrorAction SilentlyContinue | Sort-Object Name | Select-Object -Last 1
+          if (-not $wixRoot) { throw "WiX Toolset not found after install" }
+          $bin = Join-Path $wixRoot.FullName "bin"
+          Copy-Item packaging/windows/TorrentOxide.cmd "$env:STAGE/TorrentOxide.cmd"
+          New-Item -ItemType Directory -Force -Path obj | Out-Null
+          & (Join-Path $bin "heat.exe") dir "$env:STAGE\site" -nologo -cg SiteFiles -dr SiteDir `
+            -gg -g1 -sfrag -srd -sreg -var var.SiteDir -out obj\site.wxs
+          & (Join-Path $bin "candle.exe") -nologo -arch x64 `
+            -dVersion="$env:MSI_VERSION" -dStageDir="$env:STAGE" -dSiteDir="$env:STAGE\site" `
+            packaging\windows\torrentoxide.wxs obj\site.wxs -out obj\
+          & (Join-Path $bin "light.exe") -nologo -spdb -sval `
+            obj\torrentoxide.wixobj obj\site.wixobj -out "dist\$env:PKG_NAME.msi"
+
+      # ---- publish ----
+      - name: Upload workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PKG_NAME }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.msi
+          if-no-files-found: ignore
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.deb
+            dist/*.msi

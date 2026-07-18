@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- WiX v3 installer for TorrentOxide. Installs torrentoxide.exe + the site/
+     assets into Program Files and adds a Start Menu launcher.
+     Built in CI via: heat (harvest site) -> candle -> light. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*"
+           Name="TorrentOxide"
+           Language="1033"
+           Version="$(var.Version)"
+           Manufacturer="TorrentOxide"
+           UpgradeCode="7B2A1C9E-4F3D-4E6A-9C1B-2D8F5A0E7C34">
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Description="TorrentOxide — self-hosted BitTorrent client" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of TorrentOxide is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Feature Id="Complete" Title="TorrentOxide" Level="1">
+      <ComponentRef Id="MainExecutable" />
+      <ComponentRef Id="Launcher" />
+      <ComponentGroupRef Id="SiteFiles" />
+      <ComponentRef Id="ApplicationShortcut" />
+    </Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="TorrentOxide">
+          <!-- site/ contents are harvested by heat into this directory -->
+          <Directory Id="SiteDir" Name="site" />
+          <Component Id="MainExecutable" Guid="*">
+            <File Id="TorrentOxideExe" Source="$(var.StageDir)\torrentoxide.exe" KeyPath="yes" />
+          </Component>
+          <Component Id="Launcher" Guid="*">
+            <File Id="LauncherCmd" Source="$(var.StageDir)\TorrentOxide.cmd" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder" />
+    </Directory>
+
+    <DirectoryRef Id="ProgramMenuFolder">
+      <Component Id="ApplicationShortcut" Guid="*">
+        <Shortcut Id="AppStartMenuShortcut"
+                  Name="TorrentOxide"
+                  Description="Self-hosted BitTorrent client"
+                  Target="[INSTALLFOLDER]TorrentOxide.cmd"
+                  WorkingDirectory="INSTALLFOLDER" />
+        <RemoveFolder Id="CleanupShortcut" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\TorrentOxide" Name="installed"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+  </Product>
+</Wix>
