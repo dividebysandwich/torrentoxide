@@ -2,6 +2,7 @@ pub mod add_panel;
 pub mod bitfield;
 pub mod boot;
 pub mod confirm_modal;
+pub mod control_deck;
 pub mod dashboard;
 pub mod dir_picker;
 pub mod fx;

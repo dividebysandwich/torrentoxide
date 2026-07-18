@@ -66,6 +66,27 @@ pub struct StatsSnapshot {
     pub torrents: Vec<TorrentView>,
 }
 
+/// Live-adjustable, persisted global settings (rate limits, seeding goals).
+/// Stored server-side in `<PERSISTENCE_DIR>/torrentoxide.json`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Settings {
+    /// Global download rate limit in KiB/s; `0` = unlimited.
+    #[serde(default)]
+    pub down_limit_kbps: u32,
+    /// Global upload rate limit in KiB/s; `0` = unlimited.
+    #[serde(default)]
+    pub up_limit_kbps: u32,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            down_limit_kbps: 0,
+            up_limit_kbps: 0,
+        }
+    }
+}
+
 /// One entry (sub-directory) inside a directory listing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DirEntry {

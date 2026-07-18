@@ -2,6 +2,7 @@
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ffi::OsString;
+use std::num::NonZeroU32;
 use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -9,6 +10,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context};
 use librqbit::api::{ApiTorrentListOpts, TorrentIdOrHash};
+use librqbit::limits::LimitsConfig;
 use librqbit::{
     AddTorrent, AddTorrentOptions, Api, Session, SessionOptions, SessionPersistenceConfig,
     TorrentStatsState,
@@ -16,7 +18,19 @@ use librqbit::{
 use tokio::sync::watch;
 
 use crate::server::config::AppConfig;
-use crate::types::{DirEntry, DirListing, StatsSnapshot, TorrentState, TorrentView};
+use crate::types::{DirEntry, DirListing, Settings, StatsSnapshot, TorrentState, TorrentView};
+
+/// Convert a KiB/s limit (`0` = unlimited) into librqbit's bytes-per-second cap.
+fn kbps_to_nz(kbps: u32) -> Option<NonZeroU32> {
+    NonZeroU32::new(kbps.saturating_mul(1024))
+}
+
+fn limits_config(s: &Settings) -> LimitsConfig {
+    LimitsConfig {
+        download_bps: kbps_to_nz(s.down_limit_kbps),
+        upload_bps: kbps_to_nz(s.up_limit_kbps),
+    }
+}
 
 const MIB: f64 = 1024.0 * 1024.0;
 
@@ -68,17 +82,26 @@ pub struct Engine {
     pending: Mutex<Vec<PendingAdd>>,
     next_pending: AtomicU64,
     history: Mutex<History>,
+    /// Live-adjustable, persisted settings (rate limits, seeding goals).
+    settings: Mutex<Settings>,
+    /// Where `settings` is persisted (JSON, alongside librqbit's session state).
+    settings_path: PathBuf,
     /// Latest snapshot (with embedded history); updated by the sampler, relayed by SSE.
     tx: watch::Sender<Arc<StatsSnapshot>>,
 }
 
 impl Engine {
     pub async fn new(config: Arc<AppConfig>) -> anyhow::Result<Arc<Self>> {
+        // Load persisted settings and apply the saved rate limits from the start.
+        let settings_path = config.persistence_dir.join("torrentoxide.json");
+        let settings = load_settings(&settings_path);
+
         let opts = SessionOptions {
             persistence: Some(SessionPersistenceConfig::Json {
                 folder: Some(config.persistence_dir.clone()),
             }),
             fastresume: true,
+            ratelimits: limits_config(&settings),
             ..Default::default()
         };
         let session = Session::new_with_opts(config.download_dir.clone(), opts)
@@ -99,6 +122,8 @@ impl Engine {
             pending: Mutex::new(Vec::new()),
             next_pending: AtomicU64::new(0),
             history: Mutex::new(history),
+            settings: Mutex::new(settings),
+            settings_path,
             tx,
         });
 
@@ -130,6 +155,25 @@ impl Engine {
     /// The most recent snapshot recorded by the sampler.
     pub fn current(&self) -> Arc<StatsSnapshot> {
         self.tx.borrow().clone()
+    }
+
+    // --- settings (rate limits, seeding goals) -----------------------------
+
+    /// Current persisted settings.
+    pub fn get_settings(&self) -> Settings {
+        self.settings.lock().unwrap().clone()
+    }
+
+    /// Update settings: apply live (rate limits take effect immediately) and
+    /// persist to disk so they survive a restart.
+    pub fn set_settings(&self, new: Settings) -> anyhow::Result<()> {
+        let limits = limits_config(&new);
+        // Rate limits apply to the running session instantly.
+        self.api.session().ratelimits.set_download_bps(limits.download_bps);
+        self.api.session().ratelimits.set_upload_bps(limits.upload_bps);
+
+        *self.settings.lock().unwrap() = new.clone();
+        save_settings(&self.settings_path, &new)
     }
 
     // --- adding torrents ---------------------------------------------------
@@ -513,6 +557,24 @@ impl Engine {
         }
         Ok(full)
     }
+}
+
+/// Load persisted settings; fall back to defaults if the file is missing or invalid.
+fn load_settings(path: &Path) -> Settings {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<Settings>(&bytes).ok())
+        .unwrap_or_default()
+}
+
+/// Persist settings as pretty JSON (best-effort atomicity via a temp file).
+fn save_settings(path: &Path, settings: &Settings) -> anyhow::Result<()> {
+    let json = serde_json::to_vec_pretty(settings).context("failed to serialize settings")?;
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, &json).with_context(|| format!("failed to write {}", tmp.display()))?;
+    std::fs::rename(&tmp, path)
+        .with_context(|| format!("failed to persist settings to {}", path.display()))?;
+    Ok(())
 }
 
 /// Derive a friendly label for a pending add from a magnet link or URL.

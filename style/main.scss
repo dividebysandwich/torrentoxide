@@ -524,6 +524,86 @@ code {
   color: var(--yellow);
 }
 
+// ---- control deck (live global settings) -------------------------------
+
+.control-deck {
+  @include framed(12px, 1.5px, var(--panel), rgba(36, 227, 255, 0.35), var(--glow-cyan));
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 1.1rem;
+}
+.deck-title {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 2.5px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 8px var(--glow-cyan);
+  white-space: nowrap;
+}
+.deck-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: text;
+}
+.deck-label {
+  font-size: 0.66rem;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  &.down {
+    color: var(--cyan);
+  }
+  &.up {
+    color: var(--up);
+  }
+}
+.deck-input {
+  width: 5.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid rgba(36, 227, 255, 0.3);
+  background: rgba(4, 8, 14, 0.85);
+  color: var(--ink);
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-align: right;
+  @include cut(6px);
+  appearance: textfield;
+  -moz-appearance: textfield;
+  &::-webkit-outer-spin-button,
+  &::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  &::placeholder {
+    color: var(--ink-dim);
+  }
+  &:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 1px var(--cyan), 0 0 12px -2px var(--glow-cyan);
+  }
+}
+.deck-unit {
+  font-size: 0.66rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.deck-hint {
+  margin-left: auto;
+  font-size: 0.62rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+
 // ---- buttons -----------------------------------------------------------
 
 .btn {
