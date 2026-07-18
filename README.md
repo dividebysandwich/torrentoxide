@@ -6,9 +6,12 @@ A self-hostable web-driven BitTorrent client built in Rust with
 
 ![stack](https://img.shields.io/badge/rust-leptos%200.8-orange) ![engine](https://img.shields.io/badge/engine-librqbit%208-blueviolet)
 
-<img width="1341" height="967" alt="image" src="https://github.com/user-attachments/assets/febaa4ac-932f-4ff6-8329-276f76b28acb" />
+<img width="1344" height="1053" alt="image" src="https://github.com/user-attachments/assets/14c89598-8933-4bea-ba15-29637a83ef18" />
 
 <img width="651" height="515" alt="image" src="https://github.com/user-attachments/assets/f0003ecb-9fd9-4536-88d0-d2b777e67266" />
+
+<img width="788" height="533" alt="image" src="https://github.com/user-attachments/assets/7f8a349e-d9bc-40ed-b880-c2e08ef32be5" />
+
 
 ## Features
 
