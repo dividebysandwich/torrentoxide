@@ -409,6 +409,37 @@ code {
   );
   animation: crt-sweep 5.5s linear infinite;
 }
+// left-to-right light pulse (SVG rect clipped to the filled areas): brightens the
+// graph, leading edge brightest, sweeping across once every 10s.
+.graph-pulse-group {
+  mix-blend-mode: screen;
+}
+.graph-pulse {
+  transform: translateX(-340px);
+  animation: graph-pulse 10s linear infinite;
+  will-change: transform, opacity;
+}
+// y-axis scale labels (top = peak, middle = peak/2, bottom = 0)
+.graph-scale {
+  position: absolute;
+  top: 1.9rem;
+  bottom: 4px;
+  right: 8px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-end;
+  pointer-events: none;
+  font-size: 0.62rem;
+  letter-spacing: 0.5px;
+  color: var(--ink-dim);
+  span {
+    background: rgba(4, 7, 13, 0.55);
+    padding: 0 0.3rem;
+    border-right: 1px solid rgba(36, 227, 255, 0.3);
+  }
+}
 
 // ---- generic panel look ------------------------------------------------
 
@@ -738,6 +769,12 @@ code {
 .tr-actions {
   display: flex;
   gap: 0.4rem;
+  // desktop: centered under the sparkline, spanning its width
+  width: 100%;
+  justify-content: center;
+  .icon-btn {
+    flex: 1 1 0;
+  }
 }
 
 // pending (metadata-resolving) placeholder row
@@ -1004,6 +1041,26 @@ code {
     transform: translateY(210px);
   }
 }
+@keyframes graph-pulse {
+  0% {
+    transform: translateX(-340px);
+    opacity: 0;
+  }
+  1% {
+    opacity: 1;
+  }
+  29% {
+    opacity: 1;
+  }
+  30% {
+    transform: translateX(1040px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateX(1040px);
+    opacity: 0;
+  }
+}
 
 // ---- responsive --------------------------------------------------------
 
@@ -1025,6 +1082,14 @@ code {
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
+  }
+  // mobile: keep the compact, fixed-size button row
+  .tr-actions {
+    width: auto;
+    justify-content: flex-start;
+    .icon-btn {
+      flex: 0 0 auto;
+    }
   }
   .sparkline {
     width: 55%;

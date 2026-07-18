@@ -6,10 +6,21 @@ use crate::types::fmt_speed;
 const W: f64 = 1000.0;
 const H: f64 = 220.0;
 
-/// Global up/down traffic graph: two filled areas with animated neon gradients.
+/// Global up/down traffic graph: two filled areas with animated neon gradients,
+/// a rasterized CRT look, a left-to-right light pulse, and axis scale labels.
 #[component]
 pub fn TrafficGraph() -> impl IntoView {
     let state = dashboard_state();
+
+    // Peak value in the current window — drives both the plot scale and the labels.
+    let peak = move || {
+        state
+            .snapshot
+            .get()
+            .global_hist
+            .iter()
+            .fold(1.0_f64, |m, (d, u)| m.max(*d).max(*u))
+    };
 
     // Returns (down_area, up_area, down_line, up_line) SVG path/points strings.
     let geometry = move || {
@@ -53,6 +64,10 @@ pub fn TrafficGraph() -> impl IntoView {
     let down_label = move || fmt_speed(state.snapshot.get().global_down_bps);
     let up_label = move || fmt_speed(state.snapshot.get().global_up_bps);
 
+    // Y-axis scale labels (top = peak, middle = peak/2, bottom = 0).
+    let scale_top = move || fmt_speed(peak());
+    let scale_mid = move || fmt_speed(peak() / 2.0);
+
     view! {
         <div class="graph-card">
             <div class="graph-legend">
@@ -79,14 +94,34 @@ pub fn TrafficGraph() -> impl IntoView {
                         <stop offset="0%" stop-color="#ff3b7b" stop-opacity="0.6"/>
                         <stop offset="100%" stop-color="#ff3b7b" stop-opacity="0.02"/>
                     </linearGradient>
+                    // pulse gradient: brightest at the leading (right) edge, trailing off behind
+                    <linearGradient id="pulse-grad" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stop-color="#c9fbff" stop-opacity="0"/>
+                        <stop offset="78%" stop-color="#c9fbff" stop-opacity="0.12"/>
+                        <stop offset="100%" stop-color="#ffffff" stop-opacity="0.72"/>
+                    </linearGradient>
+                    // clip the pulse to the filled areas so only the graph brightens
+                    <clipPath id="pulse-clip">
+                        <path d=down_area/>
+                        <path d=up_area/>
+                    </clipPath>
                 </defs>
                 <path class="area area-down" d=down_area fill="url(#grad-down)"/>
                 <path class="area area-up" d=up_area fill="url(#grad-up)"/>
                 <polyline class="gline gline-down" points=down_line/>
                 <polyline class="gline gline-up" points=up_line/>
+                <g class="graph-pulse-group" clip-path="url(#pulse-clip)">
+                    <rect class="graph-pulse" x="0" y="0" width="320" height="220" fill="url(#pulse-grad)"/>
+                </g>
             </svg>
             // travelling scan band for the CRT/dot-matrix effect
             <div class="crt-scan"></div>
+            // y-axis scale labels
+            <div class="graph-scale">
+                <span>{scale_top}</span>
+                <span>{scale_mid}</span>
+                <span>"0"</span>
+            </div>
         </div>
     }
 }

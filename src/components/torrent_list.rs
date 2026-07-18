@@ -148,6 +148,7 @@ fn TorrentRow(id: u64) -> impl IntoView {
             .map(|t| format!("{} / {}", fmt_bytes(t.downloaded_bytes as f64), fmt_bytes(t.total_bytes as f64)))
             .unwrap_or_default()
     };
+    let uploaded_text = move || fmt_bytes(torrent.get().map(|t| t.uploaded_bytes).unwrap_or(0) as f64);
     let eta_text = move || fmt_eta(torrent.get().and_then(|t| t.eta_secs));
     let error_text = move || torrent.get().and_then(|t| t.error);
 
@@ -201,7 +202,8 @@ fn TorrentRow(id: u64) -> impl IntoView {
                 <div class="tr-stats">
                     <span class="stat down">"▼ " {down_text}</span>
                     <span class="stat up">"▲ " {up_text}</span>
-                    <span class="stat size">{size_text}</span>
+                    <span class="stat down">"↓ " {size_text}</span>
+                    <span class="stat up">"↑ " {uploaded_text}</span>
                     <span class="stat eta">"ETA " {eta_text}</span>
                 </div>
 

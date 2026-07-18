@@ -7,7 +7,7 @@ use crate::components::confirm_modal::ConfirmModal;
 use crate::components::torrent_list::TorrentList;
 use crate::components::traffic_graph::TrafficGraph;
 use crate::components::DashboardState;
-use crate::types::fmt_speed;
+use crate::types::fmt_bytes;
 
 #[component]
 pub fn Dashboard() -> impl IntoView {
@@ -26,8 +26,29 @@ pub fn Dashboard() -> impl IntoView {
     // Open the live stats stream (browser only).
     start_sse(state);
 
-    let total_down = move || fmt_speed(state.snapshot.get().global_down_bps);
-    let total_up = move || fmt_speed(state.snapshot.get().global_up_bps);
+    // Total transferred across all torrents (cumulative bytes, not speed).
+    let total_down = move || {
+        fmt_bytes(
+            state
+                .snapshot
+                .get()
+                .torrents
+                .iter()
+                .map(|t| t.downloaded_bytes)
+                .sum::<u64>() as f64,
+        )
+    };
+    let total_up = move || {
+        fmt_bytes(
+            state
+                .snapshot
+                .get()
+                .torrents
+                .iter()
+                .map(|t| t.uploaded_bytes)
+                .sum::<u64>() as f64,
+        )
+    };
     let count = move || state.snapshot.get().torrents.len().to_string();
     let auth_on = move || state.defaults.get().auth_enabled;
     let connected = move || state.connected.get();
