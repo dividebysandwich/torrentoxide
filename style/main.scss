@@ -603,6 +603,28 @@ code {
   color: var(--ink-dim);
   white-space: nowrap;
 }
+.deck-input.narrow {
+  width: 3.8rem;
+}
+.deck-sep {
+  width: 1px;
+  align-self: stretch;
+  min-height: 1.4rem;
+  background: rgba(36, 227, 255, 0.2);
+}
+.deck-seed {
+  cursor: pointer;
+  .deck-label.seed {
+    color: var(--ink-dim);
+  }
+  &.on .deck-label.seed {
+    color: var(--green);
+    text-shadow: 0 0 8px rgba(53, 255, 134, 0.4);
+  }
+}
+.deck-toggle {
+  accent-color: var(--green);
+}
 
 // ---- buttons -----------------------------------------------------------
 

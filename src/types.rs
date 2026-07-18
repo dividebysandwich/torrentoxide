@@ -76,6 +76,16 @@ pub struct Settings {
     /// Global upload rate limit in KiB/s; `0` = unlimited.
     #[serde(default)]
     pub up_limit_kbps: u32,
+    /// Auto-pause a torrent's seeding once it reaches `ratio_limit`.
+    #[serde(default)]
+    pub ratio_enabled: bool,
+    /// Seeding ratio (uploaded / downloaded) at which to stop seeding.
+    #[serde(default = "default_ratio")]
+    pub ratio_limit: f32,
+}
+
+fn default_ratio() -> f32 {
+    2.0
 }
 
 impl Default for Settings {
@@ -83,6 +93,8 @@ impl Default for Settings {
         Self {
             down_limit_kbps: 0,
             up_limit_kbps: 0,
+            ratio_enabled: false,
+            ratio_limit: default_ratio(),
         }
     }
 }

@@ -89,6 +89,9 @@ pub struct Engine {
     settings: Mutex<Settings>,
     /// Where `settings` is persisted (JSON, alongside librqbit's session state).
     settings_path: PathBuf,
+    /// Torrents auto-paused for reaching their seeding ratio — tracked so we
+    /// pause them exactly once and don't fight a manual resume.
+    ratio_paused: Mutex<HashSet<usize>>,
     /// Latest snapshot (with embedded history); updated by the sampler, relayed by SSE.
     tx: watch::Sender<Arc<StatsSnapshot>>,
 }
@@ -127,6 +130,7 @@ impl Engine {
             history: Mutex::new(history),
             settings: Mutex::new(settings),
             settings_path,
+            ratio_paused: Mutex::new(HashSet::new()),
             tx,
         });
 
@@ -140,6 +144,13 @@ impl Engine {
                 interval.tick().await;
                 let snapshot =
                     sampler.sample_and_record(tick % HISTORY_EVERY == 0, tick / HISTORY_EVERY);
+                // Auto-pause any torrent that has reached its seeding ratio goal.
+                for id in sampler.ratio_targets(&snapshot) {
+                    let e = sampler.clone();
+                    tokio::spawn(async move {
+                        let _ = e.pause(id).await;
+                    });
+                }
                 // `send_replace` always stores the value (even with zero subscribers),
                 // so a client connecting later immediately gets the full history.
                 let _ = sampler.tx.send_replace(Arc::new(snapshot));
@@ -176,7 +187,48 @@ impl Engine {
         self.api.session().ratelimits.set_upload_bps(limits.upload_bps);
 
         *self.settings.lock().unwrap() = new.clone();
+        // Re-evaluate seeding goals against the new limit (a raised limit should
+        // let previously auto-paused torrents seed again if the user resumes them).
+        self.ratio_paused.lock().unwrap().clear();
         save_settings(&self.settings_path, &new)
+    }
+
+    /// Return the ids of seeding torrents that have just reached the ratio goal
+    /// (marking them so each is auto-paused only once).
+    fn ratio_targets(&self, snapshot: &StatsSnapshot) -> Vec<u64> {
+        let settings = self.settings.lock().unwrap().clone();
+        let mut paused = self.ratio_paused.lock().unwrap();
+
+        // Drop bookkeeping for torrents that no longer exist.
+        let live: HashSet<usize> = snapshot
+            .torrents
+            .iter()
+            .filter(|t| !t.pending)
+            .map(|t| t.id as usize)
+            .collect();
+        paused.retain(|id| live.contains(id));
+
+        if !settings.ratio_enabled || settings.ratio_limit <= 0.0 {
+            return Vec::new();
+        }
+
+        let mut targets = Vec::new();
+        for t in &snapshot.torrents {
+            // Only finished (seeding) torrents that we haven't already paused.
+            if t.pending || !matches!(t.state, TorrentState::Finished) || t.downloaded_bytes == 0 {
+                continue;
+            }
+            let uid = t.id as usize;
+            if paused.contains(&uid) {
+                continue;
+            }
+            let ratio = t.uploaded_bytes as f64 / t.downloaded_bytes as f64;
+            if ratio >= settings.ratio_limit as f64 {
+                paused.insert(uid);
+                targets.push(t.id);
+            }
+        }
+        targets
     }
 
     /// Change which files a running torrent downloads (per-file selection).

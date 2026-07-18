@@ -41,6 +41,18 @@ pub fn ControlDeck() -> impl IntoView {
         settings.update(|s| s.up_limit_kbps = v);
         save();
     };
+    let on_ratio_toggle = move |e| {
+        let on = event_target_checked(&e);
+        settings.update(|s| s.ratio_enabled = on);
+        save();
+    };
+    let on_ratio = move |e| {
+        let v = event_target_value(&e).trim().parse::<f32>().unwrap_or(0.0).max(0.0);
+        settings.update(|s| s.ratio_limit = v);
+        save();
+    };
+    let ratio_on = move || settings.get().ratio_enabled;
+    let ratio_val = move || format!("{:.2}", settings.get().ratio_limit);
 
     // Show a blank field (with an ∞ placeholder) when the limit is 0.
     let down_val = move || match settings.get().down_limit_kbps {
@@ -78,6 +90,26 @@ pub fn ControlDeck() -> impl IntoView {
                     on:change=on_up
                 />
                 <span class="deck-unit">"KiB/s"</span>
+            </label>
+            <span class="deck-sep"></span>
+            <label class="deck-field deck-seed" class:on=ratio_on>
+                <input
+                    r#type="checkbox"
+                    class="deck-toggle"
+                    prop:checked=ratio_on
+                    on:change=on_ratio_toggle
+                />
+                <span class="deck-label seed">"♻ SEED ≤"</span>
+                <input
+                    class="deck-input narrow"
+                    r#type="number"
+                    min="0"
+                    step="0.1"
+                    prop:value=ratio_val
+                    prop:disabled=move || !ratio_on()
+                    on:change=on_ratio
+                />
+                <span class="deck-unit">"RATIO"</span>
             </label>
             <span class="deck-hint">
                 {move || if loaded.get() { "0 = UNLIMITED" } else { "SYNC…" }}
