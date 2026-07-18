@@ -103,9 +103,9 @@ pub fn Dashboard() -> impl IntoView {
             </header>
 
             <main class="content">
+                <ControlDeck/>
                 <TrafficGraph/>
                 <AddTorrentPanel/>
-                <ControlDeck/>
                 <TorrentList/>
                 <LogTicker/>
             </main>

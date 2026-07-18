@@ -1,6 +1,6 @@
 [package]
 name = "torrentoxide"
-version = "0.1.2"
+version = "0.2.0"
 edition = "2021"
 
 [lib]
@@ -55,6 +55,7 @@ librqbit = { version = "8", optional = true, default-features = false, features 
   "rust-tls",
 ] }
 dotenvy = { version = "0.15", optional = true }
+fs4 = { version = "1", optional = true }
 async-stream = { version = "0.3", optional = true }
 futures = { version = "0.3", optional = true }
 tracing = { version = "0.1", optional = true }
@@ -86,6 +87,7 @@ ssr = [
   "dep:http",
   "dep:librqbit",
   "dep:dotenvy",
+  "dep:fs4",
   "dep:async-stream",
   "dep:futures",
   "dep:tracing",

@@ -63,6 +63,12 @@ pub struct StatsSnapshot {
     /// client drive a smooth 1-second scroll animation on the graph.
     #[serde(default)]
     pub hist_tick: u64,
+    /// Free bytes available on the download folder's filesystem.
+    #[serde(default)]
+    pub disk_free: u64,
+    /// Total bytes on the download folder's filesystem.
+    #[serde(default)]
+    pub disk_total: u64,
     pub torrents: Vec<TorrentView>,
 }
 

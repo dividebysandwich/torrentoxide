@@ -92,6 +92,8 @@ pub struct Engine {
     /// Torrents auto-paused for reaching their seeding ratio — tracked so we
     /// pause them exactly once and don't fight a manual resume.
     ratio_paused: Mutex<HashSet<usize>>,
+    /// Cached (free, total) bytes on the download filesystem, refreshed at 1 Hz.
+    disk: Mutex<(u64, u64)>,
     /// Latest snapshot (with embedded history); updated by the sampler, relayed by SSE.
     tx: watch::Sender<Arc<StatsSnapshot>>,
 }
@@ -101,6 +103,8 @@ impl Engine {
         // Load persisted settings and apply the saved rate limits from the start.
         let settings_path = config.persistence_dir.join("torrentoxide.json");
         let settings = load_settings(&settings_path);
+        // Filesystem the download folder lives on (for the free-space gauge).
+        let disk_dir = config.download_dir.clone();
 
         let opts = SessionOptions {
             persistence: Some(SessionPersistenceConfig::Json {
@@ -131,6 +135,7 @@ impl Engine {
             settings: Mutex::new(settings),
             settings_path,
             ratio_paused: Mutex::new(HashSet::new()),
+            disk: Mutex::new(read_disk(&disk_dir)),
             tx,
         });
 
@@ -631,6 +636,16 @@ impl Engine {
             hist.global.iter().copied().collect::<Vec<_>>()
         };
 
+        // Refresh the cached free-space reading at the 1 Hz history cadence
+        // (statvfs is cheap, but there's no need to hit it 4×/second).
+        let (disk_free, disk_total) = {
+            let mut d = self.disk.lock().unwrap();
+            if record_history {
+                *d = read_disk(&self.config.download_dir);
+            }
+            *d
+        };
+
         let mut torrents: Vec<TorrentView> = reals.into_iter().map(|(_, v)| v).collect();
         torrents.sort_by_key(|t| t.id);
 
@@ -667,6 +682,8 @@ impl Engine {
             global_up_bps: global_up,
             global_hist,
             hist_tick,
+            disk_free,
+            disk_total,
             torrents,
         }
     }
@@ -767,6 +784,14 @@ impl Engine {
         }
         Ok(full)
     }
+}
+
+/// Read (available, total) bytes on the filesystem backing `dir`. Best-effort:
+/// a failure (e.g. the path just vanished) reports zeros rather than erroring.
+fn read_disk(dir: &Path) -> (u64, u64) {
+    let free = fs4::available_space(dir).unwrap_or(0);
+    let total = fs4::total_space(dir).unwrap_or(0);
+    (free, total)
 }
 
 /// Map librqbit's `list_only` file details into our wire `FileEntry` list.

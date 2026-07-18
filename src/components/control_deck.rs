@@ -5,12 +5,38 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{get_settings, set_settings};
-use crate::types::Settings;
+use crate::components::dashboard_state;
+use crate::types::{fmt_bytes, Settings};
 
 #[component]
 pub fn ControlDeck() -> impl IntoView {
+    let state = dashboard_state();
     let settings = RwSignal::new(Settings::default());
     let loaded = RwSignal::new(false);
+
+    // Free-disk gauge (from the live snapshot).
+    let disk_free = move || state.snapshot.get().disk_free;
+    let disk_total = move || state.snapshot.get().disk_total;
+    let have_disk = move || disk_total() > 0;
+    let used_pct = move || {
+        let t = disk_total();
+        if t > 0 {
+            ((t - disk_free().min(t)) as f64 / t as f64 * 100.0).clamp(0.0, 100.0)
+        } else {
+            0.0
+        }
+    };
+    let disk_low = move || {
+        let t = disk_total();
+        t > 0 && (disk_free() as f64 / t as f64) < 0.05
+    };
+    let disk_text = move || {
+        if have_disk() {
+            format!("{} FREE", fmt_bytes(disk_free() as f64))
+        } else {
+            "— ".to_string()
+        }
+    };
 
     // Load persisted settings once, client-side.
     Effect::new(move |_| {
@@ -114,6 +140,17 @@ pub fn ControlDeck() -> impl IntoView {
             <span class="deck-hint">
                 {move || if loaded.get() { "0 = UNLIMITED" } else { "SYNC…" }}
             </span>
+            <div class="deck-disk" class:low=disk_low>
+                <span class="deck-label">"◆ DISK"</span>
+                <div class="disk-bar">
+                    <span
+                        class="disk-fill"
+                        class:low=disk_low
+                        style=move || format!("width:{:.1}%", used_pct())
+                    ></span>
+                </div>
+                <span class="disk-text">{disk_text}</span>
+            </div>
         </div>
     }
 }

@@ -596,12 +596,46 @@ code {
   color: var(--ink-dim);
 }
 .deck-hint {
-  margin-left: auto;
   font-size: 0.62rem;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--ink-dim);
   white-space: nowrap;
+}
+.deck-disk {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.disk-bar {
+  width: 120px;
+  height: 8px;
+  background: rgba(4, 8, 14, 0.9);
+  border: 1px solid rgba(36, 227, 255, 0.25);
+  overflow: hidden;
+  @include cut(3px);
+}
+.disk-fill {
+  display: block;
+  height: 100%;
+  background: linear-gradient(90deg, var(--cyan), #1c9fd0);
+  box-shadow: 0 0 8px -1px var(--glow-cyan);
+  transition: width 0.6s ease;
+  &.low {
+    background: linear-gradient(90deg, var(--red-bright), var(--red));
+    box-shadow: 0 0 8px -1px var(--glow-red);
+  }
+}
+.disk-text {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--cyan);
+}
+.deck-disk.low .disk-text {
+  color: var(--red-bright);
 }
 .deck-input.narrow {
   width: 3.8rem;
