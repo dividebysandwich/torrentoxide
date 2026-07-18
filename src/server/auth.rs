@@ -54,7 +54,8 @@ pub async fn require_auth(State(state): State<AppState>, req: Request, next: Nex
     let public = path == "/login"
         || path == "/logout"
         || path == "/favicon.ico"
-        || path.starts_with("/pkg/");
+        || path.starts_with("/pkg/")
+        || path.starts_with("/fonts/");
     if public {
         return next.run(req).await;
     }
@@ -86,50 +87,55 @@ fn login_html(error: bool) -> String {
     <title>TorrentOxide · Login</title>
     <link rel="stylesheet" href="/pkg/torrentoxide.css"/>
     <style>
-        :root {{ color-scheme: dark; }}
+        :root {{ color-scheme: dark; --red:#ff2b4d; --cyan:#24e3ff; --ink:#d7e9f6; }}
         html, body {{ height: 100%; margin: 0; }}
         body {{
-            background: radial-gradient(1200px 800px at 20% -10%, #131033 0%, #08070f 55%, #05040a 100%);
-            color: #e8ecff;
-            font-family: ui-monospace, "JetBrains Mono", "Fira Code", monospace;
+            background:
+                radial-gradient(130% 90% at 50% -25%, rgba(255,43,77,.12), transparent 55%),
+                linear-gradient(180deg, #05070e, #04060b 45%);
+            color: var(--ink);
+            font-family: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+            font-weight: 500; letter-spacing: .5px;
             display: flex; align-items: center; justify-content: center;
         }}
         .login-card {{
-            width: min(92vw, 380px);
-            padding: 2.4rem 2rem;
-            border-radius: 18px;
-            background: rgba(18, 16, 40, 0.72);
-            border: 1px solid rgba(120, 90, 255, 0.35);
-            box-shadow: 0 0 40px rgba(120, 60, 255, 0.25), inset 0 0 30px rgba(0, 240, 255, 0.05);
-            backdrop-filter: blur(12px);
+            position: relative; isolation: isolate;
+            width: min(92vw, 380px); padding: 2.4rem 2.1rem;
+            background: var(--red);
+            clip-path: polygon(0 0, calc(100% - 16px) 0, 100% 16px, 100% 100%, 16px 100%, 0 calc(100% - 16px));
+            filter: drop-shadow(0 0 14px rgba(255,43,77,.5));
+        }}
+        .login-card::before {{
+            content:""; position:absolute; inset:2px; background:#0a0e18; z-index:-1;
+            clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px));
         }}
         .login-title {{
-            margin: 0 0 0.35rem; font-size: 1.6rem; letter-spacing: 2px; font-weight: 800;
-            background: linear-gradient(90deg, #00f0ff, #a56bff, #ff5cf0);
-            -webkit-background-clip: text; background-clip: text; color: transparent;
+            margin: 0 0 0.3rem; font-size: 1.8rem; letter-spacing: 3px; font-weight: 700;
+            text-transform: uppercase; color: var(--cyan); text-shadow: 0 0 12px rgba(36,227,255,.5);
         }}
-        .login-sub {{ margin: 0 0 1.6rem; color: #8b8fb5; font-size: 0.8rem; letter-spacing: 1px; }}
+        .login-title b {{ color: var(--red); text-shadow: 0 0 12px rgba(255,43,77,.6); }}
+        .login-sub {{ margin: 0 0 1.7rem; color: #6d7d93; font-size: 0.75rem; letter-spacing: 2px; text-transform: uppercase; }}
         .login-field {{ display: block; margin-bottom: 1rem; }}
-        .login-field span {{ display: block; font-size: 0.72rem; color: #9aa0cc; margin-bottom: 0.35rem; letter-spacing: 1px; text-transform: uppercase; }}
+        .login-field span {{ display: block; font-size: 0.68rem; color: #6d7d93; margin-bottom: 0.35rem; letter-spacing: 2px; text-transform: uppercase; }}
         .login-field input {{
             width: 100%; box-sizing: border-box; padding: 0.7rem 0.85rem;
-            border-radius: 10px; border: 1px solid rgba(120, 130, 200, 0.3);
-            background: rgba(8, 8, 20, 0.75); color: #e8ecff; font: inherit;
+            border: 1px solid rgba(36,227,255,.3); background: rgba(4,8,14,.85); color: var(--ink); font: inherit;
+            clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
         }}
-        .login-field input:focus {{ outline: none; border-color: #00f0ff; box-shadow: 0 0 0 2px rgba(0,240,255,0.25); }}
+        .login-field input:focus {{ outline: none; border-color: var(--cyan); box-shadow: 0 0 12px -2px rgba(36,227,255,.5); }}
         .login-btn {{
-            width: 100%; margin-top: 0.6rem; padding: 0.75rem; border: none; cursor: pointer;
-            border-radius: 10px; font: inherit; font-weight: 700; letter-spacing: 1px; color: #05040a;
-            background: linear-gradient(90deg, #00f0ff, #a56bff); text-transform: uppercase;
-            box-shadow: 0 0 20px rgba(0, 240, 255, 0.35);
+            width: 100%; margin-top: 0.7rem; padding: 0.8rem; border: none; cursor: pointer;
+            font: inherit; font-weight: 700; letter-spacing: 2px; color: #04060b; text-transform: uppercase;
+            background: linear-gradient(120deg, var(--cyan), #12a8d8); box-shadow: 0 0 18px -2px rgba(36,227,255,.5);
+            clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
         }}
-        .login-btn:hover {{ filter: brightness(1.1); }}
-        .login-error {{ color: #ff6b9d; font-size: 0.8rem; margin: 0 0 1rem; }}
+        .login-btn:hover {{ filter: brightness(1.15); }}
+        .login-error {{ color: #ff5e77; font-size: 0.82rem; margin: 0 0 1rem; letter-spacing: .5px; }}
     </style>
 </head>
 <body>
     <form class="login-card" method="post" action="/login">
-        <h1 class="login-title">TORRENTOXIDE</h1>
+        <h1 class="login-title">TORRENT<b>OXIDE</b></h1>
         <p class="login-sub">// authenticate to continue</p>
         {error_html}
         <label class="login-field">

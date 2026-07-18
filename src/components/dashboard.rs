@@ -33,6 +33,11 @@ pub fn Dashboard() -> impl IntoView {
     let connected = move || state.connected.get();
 
     view! {
+        // decorative HUD frame + scattered technical readouts (non-interactive)
+        <div class="hud-flair" aria-hidden="true">
+            <div class="hud-data left">"SYS//NETRUNNER.v6\nPROTOCOL 6520-A44\nLINK: SECURE\n0x1F.4A.C2"</div>
+            <div class="hud-data right">"TRAFFIC.MON\nBUF 0xA830\n1010 0110 1101\nSTATUS: LIVE"</div>
+        </div>
         <div class="app-shell">
             <header class="topbar">
                 <div class="brand">

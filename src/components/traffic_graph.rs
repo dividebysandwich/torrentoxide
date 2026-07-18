@@ -72,12 +72,12 @@ pub fn TrafficGraph() -> impl IntoView {
             >
                 <defs>
                     <linearGradient id="grad-down" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.75"/>
-                        <stop offset="100%" stop-color="#00f0ff" stop-opacity="0.02"/>
+                        <stop offset="0%" stop-color="#24e3ff" stop-opacity="0.8"/>
+                        <stop offset="100%" stop-color="#24e3ff" stop-opacity="0.02"/>
                     </linearGradient>
                     <linearGradient id="grad-up" x1="0" x2="0" y1="0" y2="1">
-                        <stop offset="0%" stop-color="#ff4df0" stop-opacity="0.6"/>
-                        <stop offset="100%" stop-color="#ff4df0" stop-opacity="0.02"/>
+                        <stop offset="0%" stop-color="#ff3b7b" stop-opacity="0.6"/>
+                        <stop offset="100%" stop-color="#ff3b7b" stop-opacity="0.02"/>
                     </linearGradient>
                 </defs>
                 <path class="area area-down" d=down_area fill="url(#grad-down)"/>
@@ -85,6 +85,8 @@ pub fn TrafficGraph() -> impl IntoView {
                 <polyline class="gline gline-down" points=down_line/>
                 <polyline class="gline gline-up" points=up_line/>
             </svg>
+            // travelling scan band for the CRT/dot-matrix effect
+            <div class="crt-scan"></div>
         </div>
     }
 }
