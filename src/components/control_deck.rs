@@ -30,11 +30,21 @@ pub fn ControlDeck() -> impl IntoView {
         let t = disk_total();
         t > 0 && (disk_free() as f64 / t as f64) < 0.05
     };
+    // Bytes in use = total − free (the bar fills with this, so it's full when the
+    // disk is almost full). Shown as "used / total" to make that unambiguous.
+    let disk_used = move || {
+        let t = disk_total();
+        t.saturating_sub(disk_free().min(t))
+    };
     let disk_text = move || {
         if have_disk() {
-            format!("{} FREE", fmt_bytes(disk_free() as f64))
+            format!(
+                "{} / {}",
+                fmt_bytes(disk_used() as f64),
+                fmt_bytes(disk_total() as f64)
+            )
         } else {
-            "— ".to_string()
+            "—".to_string()
         }
     };
 
