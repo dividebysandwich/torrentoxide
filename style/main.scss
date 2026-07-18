@@ -1145,7 +1145,20 @@ code {
 .detail-modal {
   width: min(96vw, 780px);
   max-height: 88vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  // Fixed-height sections stay put; the file list (below) takes the rest.
+  > * {
+    flex: 0 0 auto;
+  }
+  > .files-card {
+    flex: 1 1 auto;
+    min-height: 140px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
 }
 .detail-head {
   display: flex;
@@ -1367,6 +1380,15 @@ code {
   max-height: 260px;
   overflow-y: auto;
   font-size: 0.85rem;
+}
+// In the detail modal the tree fills the remaining height and scrolls there.
+.files-card .file-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+.files-head {
+  flex: 0 0 auto;
 }
 .tree-dir {
   display: flex;
@@ -1801,6 +1823,15 @@ code {
   }
   .detail-grid {
     grid-template-columns: 1fr;
+  }
+  // On small/short screens, scroll the whole dialog instead of just the tree.
+  .detail-modal {
+    display: block;
+    overflow-y: auto;
+  }
+  .files-card .file-tree {
+    flex: none;
+    max-height: 300px;
   }
   .control-deck {
     gap: 0.9rem;
