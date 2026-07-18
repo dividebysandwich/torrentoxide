@@ -3,8 +3,14 @@
 # Usage: packaging/build-deb.sh <version>   (run from the repo root)
 set -euo pipefail
 
-VERSION="${1:?usage: build-deb.sh <version>}"
-ARCH="${DEB_ARCH:-amd64}"
+VERSION="${1:?usage: build-deb.sh <version> [deb-arch]}"
+DEB_ARCH="${2:-amd64}"
+case "$DEB_ARCH" in
+  amd64) RID="linux-x86_64" ;;
+  arm64) RID="linux-arm64" ;;   # 64-bit Raspberry Pi OS (Pi 3/4/5, Zero 2)
+  armhf) RID="linux-armv7" ;;
+  *)     RID="linux-${DEB_ARCH}" ;;
+esac
 BIN="target/release/torrentoxide"
 SITE="target/site"
 
@@ -32,7 +38,7 @@ mkdir -p "$PKG/DEBIAN"
 cat > "$PKG/DEBIAN/control" <<EOF
 Package: torrentoxide
 Version: ${VERSION}
-Architecture: ${ARCH}
+Architecture: ${DEB_ARCH}
 Maintainer: TorrentOxide <torrentoxide@users.noreply.github.com>
 Section: net
 Priority: optional
@@ -80,6 +86,6 @@ EOF
 chmod 0755 "$PKG/DEBIAN/postinst" "$PKG/DEBIAN/prerm" "$PKG/DEBIAN/postrm"
 
 mkdir -p dist
-OUT="dist/torrentoxide-${VERSION}-linux-x86_64.deb"
+OUT="dist/torrentoxide-${VERSION}-${RID}.deb"
 dpkg-deb --root-owner-group --build "$PKG" "$OUT"
 echo "built $OUT"

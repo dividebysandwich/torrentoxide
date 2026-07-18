@@ -87,7 +87,12 @@ docker compose up -d --build    # rebuild after pulling new code
 | --- | --- |
 | **Windows** (x86_64) | `.zip` (portable) · `.msi` (installer + Start Menu shortcut) |
 | **Linux** (x86_64) | `.tar.gz` (portable) · `.deb` (installs a `systemd` service) |
-| **macOS** (Intel + Apple Silicon) | `.tar.gz` (portable) |
+| **Linux ARM64 / Raspberry Pi** (Pi 3/4/5, Zero 2 W) | `.tar.gz` (portable) · `.deb` (systemd service) |
+| **macOS** (universal — Intel + Apple Silicon) | `.tar.gz` (portable) |
+
+> **Raspberry Pi:** use the `linux-arm64` build on a **64-bit** OS (Raspberry Pi OS 64-bit /
+> Ubuntu; Bookworm or newer). 32-bit installs aren't supported — reflash 64-bit, or build
+> from source / run the Docker image (the `Dockerfile` builds natively on the Pi).
 
 Each package bundles the server binary **and** its `site/` web assets; the binary
 locates them next to itself, so the portable archives just need extract + run:

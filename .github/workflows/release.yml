@@ -26,16 +26,22 @@ jobs:
             rid: linux-x86_64
             target: x86_64-unknown-linux-gnu
             ext: ""
+            deb_arch: amd64
+          # 64-bit Raspberry Pi (Pi 3/4/5, Zero 2 W) — native arm64 build.
+          # Built on 22.04 (glibc 2.35) for compatibility with Raspberry Pi OS Bookworm.
+          - os: ubuntu-22.04-arm
+            rid: linux-arm64
+            target: aarch64-unknown-linux-gnu
+            ext: ""
+            deb_arch: arm64
           - os: windows-latest
             rid: windows-x86_64
             target: x86_64-pc-windows-msvc
             ext: ".exe"
-          - os: macos-13
-            rid: macos-x86_64
-            target: x86_64-apple-darwin
-            ext: ""
+          # One Apple Silicon runner produces a universal (Intel + ARM) binary via
+          # lipo — GitHub's Intel `macos-13` runners are being retired.
           - os: macos-14
-            rid: macos-arm64
+            rid: macos-universal
             target: aarch64-apple-darwin
             ext: ""
 
@@ -51,13 +57,33 @@ jobs:
         with:
           key: ${{ matrix.rid }}
 
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
       - name: Install cargo-leptos
-        uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-leptos
+        shell: bash
+        run: cargo binstall -y cargo-leptos@0.3.2
 
       - name: Build (release)
         run: cargo leptos build --release
+
+      # Make the macOS binary universal (arm64 + x86_64) so it runs on both Apple
+      # Silicon and Intel Macs, using only the arm64 runner. Best-effort: if the
+      # x86_64 cross-build fails, the arm64 binary is shipped as-is.
+      - name: macOS universal binary
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          rustup target add x86_64-apple-darwin
+          if cargo build --release --no-default-features --features ssr \
+               --bin torrentoxide --target x86_64-apple-darwin; then
+            lipo -create -output target/release/torrentoxide.uni \
+              target/release/torrentoxide target/x86_64-apple-darwin/release/torrentoxide
+            mv target/release/torrentoxide.uni target/release/torrentoxide
+            echo "universal binary:"; lipo -info target/release/torrentoxide
+          else
+            echo "::warning::x86_64 cross-build failed — shipping arm64-only macOS binary"
+          fi
 
       - name: Determine version
         shell: bash
@@ -106,11 +132,11 @@ jobs:
         shell: pwsh
         run: Compress-Archive -Path "dist/$env:PKG_NAME" -DestinationPath "dist/$env:PKG_NAME.zip"
 
-      # ---- Linux .deb ----
+      # ---- Linux .deb (x86_64 + arm64/Raspberry Pi) ----
       - name: Build .deb
-        if: matrix.rid == 'linux-x86_64'
+        if: matrix.deb_arch != ''
         shell: bash
-        run: bash packaging/build-deb.sh "$VERSION"
+        run: bash packaging/build-deb.sh "$VERSION" "${{ matrix.deb_arch }}"
 
       # ---- Windows .msi (WiX v3: heat -> candle -> light) ----
       - name: Build .msi
