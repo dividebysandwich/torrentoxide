@@ -5,6 +5,16 @@ set -euo pipefail
 
 VERSION="${1:?usage: build-deb.sh <version> [deb-arch]}"
 DEB_ARCH="${2:-amd64}"
+
+# The Debian control "Version" must start with a digit and use a limited charset.
+# Keep the (possibly non-numeric, e.g. a branch name) VERSION for the file name,
+# but derive a valid control version from it.
+case "$VERSION" in
+  [0-9]*) DEB_VERSION="$VERSION" ;;
+  *)      DEB_VERSION="0.0.0~$VERSION" ;;
+esac
+DEB_VERSION="$(printf '%s' "$DEB_VERSION" | tr -cd 'A-Za-z0-9.+~-')"
+
 case "$DEB_ARCH" in
   amd64) RID="linux-x86_64" ;;
   arm64) RID="linux-arm64" ;;   # 64-bit Raspberry Pi OS (Pi 3/4/5, Zero 2)
@@ -37,7 +47,7 @@ SIZE_KB="$(du -sk "$PKG" | cut -f1)"
 mkdir -p "$PKG/DEBIAN"
 cat > "$PKG/DEBIAN/control" <<EOF
 Package: torrentoxide
-Version: ${VERSION}
+Version: ${DEB_VERSION}
 Architecture: ${DEB_ARCH}
 Maintainer: TorrentOxide <torrentoxide@users.noreply.github.com>
 Section: net
