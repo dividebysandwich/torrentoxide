@@ -12,7 +12,7 @@
     <Package InstallerVersion="500"
              Compressed="yes"
              InstallScope="perMachine"
-             Description="TorrentOxide — self-hosted BitTorrent client" />
+             Description="TorrentOxide - self-hosted BitTorrent client" />
     <MajorUpgrade DowngradeErrorMessage="A newer version of TorrentOxide is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
