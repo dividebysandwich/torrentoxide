@@ -12,7 +12,7 @@ use leptos::portal::Portal;
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::api::get_torrent_detail;
+use crate::api::{get_torrent_detail, update_torrent_files};
 use crate::components::dashboard_state;
 use crate::components::file_tree::FileTree;
 use crate::types::{fmt_bytes, TorrentDetail};
@@ -145,6 +145,63 @@ fn TrackerCard(detail: Detail) -> impl IntoView {
 }
 
 #[component]
+fn FilesCard(detail: Detail, selected: RwSignal<HashSet<usize>>) -> impl IntoView {
+    let files_sig = Signal::derive(move || detail.get().map(|d| d.files).unwrap_or_default());
+    let applying = RwSignal::new(false);
+    let applied = RwSignal::new(false);
+
+    let select_all = move |_| selected.set(files_sig.get().iter().map(|f| f.index).collect());
+    let select_none = move |_| selected.set(HashSet::new());
+    let count = move || selected.get().len();
+
+    let apply = move |_| {
+        let Some(id) = detail.get().map(|d| d.id) else {
+            return;
+        };
+        let mut indices: Vec<usize> = selected.get().into_iter().collect();
+        indices.sort_unstable();
+        applying.set(true);
+        applied.set(false);
+        spawn_local(async move {
+            let _ = update_torrent_files(id, indices).await;
+            applying.set(false);
+            applied.set(true);
+            set_timeout(move || applied.set(false), Duration::from_millis(2500));
+        });
+    };
+
+    let apply_label = move || {
+        if applying.get() {
+            "APPLYING…".to_string()
+        } else if applied.get() {
+            "✓ APPLIED".to_string()
+        } else {
+            format!("APPLY ({})", count())
+        }
+    };
+
+    view! {
+        <section class="detail-card files-card">
+            <div class="files-head">
+                <span class="detail-card-title">"FILES"</span>
+                <div class="fsel-toolbar">
+                    <button class="btn btn-ghost btn-sm" on:click=select_all>"✓ All"</button>
+                    <button class="btn btn-ghost btn-sm" on:click=select_none>"✕ None"</button>
+                    <button
+                        class="btn btn-primary btn-sm"
+                        prop:disabled=move || applying.get() || count() == 0
+                        on:click=apply
+                    >
+                        {apply_label}
+                    </button>
+                </div>
+            </div>
+            <FileTree files=files_sig selected=selected interactive=true/>
+        </section>
+    }
+}
+
+#[component]
 pub fn DetailModal() -> impl IntoView {
     let state = dashboard_state();
     let detail: Detail = RwSignal::new(None);
@@ -188,7 +245,6 @@ pub fn DetailModal() -> impl IntoView {
     let close = move |_| state.detail_id.set(None);
     let name = move || detail.get().map(|d| d.name).unwrap_or_default();
     let loading = move || detail.get().is_none();
-    let files_sig = Signal::derive(move || detail.get().map(|d| d.files).unwrap_or_default());
 
     view! {
         <Portal>
@@ -209,10 +265,7 @@ pub fn DetailModal() -> impl IntoView {
                             <DhtCard detail=detail/>
                         </div>
                         <TrackerCard detail=detail/>
-                        <section class="detail-card files-card">
-                            <span class="detail-card-title">"FILES"</span>
-                            <FileTree files=files_sig selected=selected interactive=false/>
-                        </section>
+                        <FilesCard detail=detail selected=selected/>
                     </div>
                 </div>
             }

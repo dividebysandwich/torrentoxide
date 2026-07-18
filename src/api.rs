@@ -136,6 +136,18 @@ pub async fn get_torrent_detail(id: u64) -> Result<TorrentDetail, ServerFnError>
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
+/// Change which files a running torrent downloads.
+#[server]
+pub async fn update_torrent_files(id: u64, files: Vec<usize>) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .engine
+        .update_files(id, files)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
 #[server]
 pub async fn get_settings() -> Result<Settings, ServerFnError> {
     use crate::server::AppState;

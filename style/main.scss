@@ -1293,6 +1293,20 @@ code {
 .files-card {
   margin-bottom: 0.2rem;
 }
+.files-head {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+  .detail-card-title {
+    margin-bottom: 0;
+    flex: 1 1 auto;
+  }
+  .fsel-toolbar {
+    margin: 0;
+  }
+}
 .file-tree {
   max-height: 260px;
   overflow-y: auto;

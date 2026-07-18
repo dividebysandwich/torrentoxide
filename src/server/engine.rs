@@ -179,6 +179,17 @@ impl Engine {
         save_settings(&self.settings_path, &new)
     }
 
+    /// Change which files a running torrent downloads (per-file selection).
+    pub async fn update_files(&self, id: u64, files: Vec<usize>) -> anyhow::Result<()> {
+        let idx = TorrentIdOrHash::Id(id as usize);
+        let set: HashSet<usize> = files.into_iter().collect();
+        self.api
+            .api_torrent_action_update_only_files(idx, &set)
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        Ok(())
+    }
+
     // --- torrent detail (inspector) ----------------------------------------
 
     /// Full inspector view for one torrent: file list (with per-file progress),
