@@ -281,6 +281,57 @@ code {
   margin: 0;
 }
 
+// ---- main navigation ---------------------------------------------------
+
+.mainnav {
+  display: flex;
+  gap: 0.2rem;
+  flex-wrap: wrap;
+  a {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    text-decoration: none;
+    padding: 0.35rem 0.7rem;
+    border: 1px solid transparent;
+    @include cut(5px);
+    transition: all 0.12s ease;
+    &:hover {
+      color: var(--cyan);
+    }
+    &[aria-current] {
+      color: var(--cyan-bright);
+      border-color: rgba(36, 227, 255, 0.4);
+      background: rgba(36, 227, 255, 0.08);
+      box-shadow: 0 0 10px -3px var(--glow-cyan);
+    }
+  }
+}
+
+// ---- generic page stub -------------------------------------------------
+
+.page-stub {
+  @include framed(14px, 1.5px, var(--panel), rgba(36, 227, 255, 0.35), var(--glow-cyan));
+  padding: 2.4rem 2rem;
+  text-align: center;
+}
+.page-title {
+  margin: 0 0 0.7rem;
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  text-shadow: 0 0 10px var(--glow-cyan);
+}
+.page-stub-note {
+  margin: 0;
+  color: var(--ink-dim);
+  letter-spacing: 0.5px;
+}
+
 .content {
   display: flex;
   flex-direction: column;

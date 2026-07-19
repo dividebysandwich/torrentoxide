@@ -7,13 +7,18 @@ pub mod control_deck;
 pub mod dashboard;
 pub mod detail_modal;
 pub mod dir_picker;
+pub mod feeds_page;
 pub mod file_tree;
 pub mod fx;
+pub mod layout;
+pub mod library_page;
 pub mod logticker;
 pub mod scramble;
+pub mod settings_page;
 pub mod sparkline;
 pub mod torrent_list;
 pub mod traffic_graph;
+pub mod wanted_page;
 
 use leptos::prelude::*;
 
