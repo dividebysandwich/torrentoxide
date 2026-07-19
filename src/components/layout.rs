@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 use leptos_router::components::{Outlet, A};
 
-use crate::api::get_defaults;
+use crate::api::{get_defaults, list_categories};
 use crate::components::boot::BootSequence;
 use crate::components::confirm_modal::ConfirmModal;
 use crate::components::detail_modal::DetailModal;
@@ -24,6 +24,15 @@ pub fn Layout() -> impl IntoView {
         spawn_local(async move {
             if let Ok(defaults) = get_defaults().await {
                 state.defaults.set(defaults);
+            }
+        });
+    });
+
+    // Load user categories once (the settings page refreshes them on change).
+    Effect::new(move |_| {
+        spawn_local(async move {
+            if let Ok(cats) = list_categories().await {
+                state.categories.set(cats);
             }
         });
     });

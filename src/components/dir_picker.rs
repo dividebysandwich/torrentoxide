@@ -11,6 +11,10 @@ use crate::types::DirListing;
 pub fn DirPicker(
     open: RwSignal<bool>,
     #[prop(into)] on_select: Callback<String>,
+    /// Optional starting folder (e.g. a selected category's directory); falls
+    /// back to the default download directory when empty.
+    #[prop(optional, into)]
+    start: Signal<Option<String>>,
 ) -> impl IntoView {
     let state = dashboard_state();
     let listing = RwSignal::new(None::<DirListing>);
@@ -29,11 +33,15 @@ pub fn DirPicker(
         });
     };
 
-    // Load the starting directory whenever the modal opens.
+    // Load the starting directory whenever the modal opens — a provided `start`
+    // (category folder) wins, otherwise the default download directory.
     Effect::new(move |_| {
         if open.get() && listing.get_untracked().is_none() {
-            let start = state.defaults.get_untracked().download_dir;
-            load((!start.is_empty()).then_some(start));
+            let start_path = match start.get_untracked() {
+                Some(p) if !p.trim().is_empty() => p,
+                _ => state.defaults.get_untracked().download_dir,
+            };
+            load((!start_path.is_empty()).then_some(start_path));
         }
     });
 

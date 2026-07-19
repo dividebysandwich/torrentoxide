@@ -17,6 +17,7 @@ async fn main() {
     use torrentoxide::app::{shell, App};
     use torrentoxide::server::config::AppConfig;
     use torrentoxide::server::engine::Engine;
+    use torrentoxide::server::pvr::Pvr;
     use torrentoxide::server::{
         auth,
         events::sse_handler,
@@ -36,6 +37,7 @@ async fn main() {
     let engine = Engine::new(config.clone())
         .await
         .expect("failed to start torrent engine");
+    let pvr = Pvr::new(config.clone(), engine.clone()).expect("failed to initialize PVR store");
 
     // Leptos options come from cargo-leptos env vars (LEPTOS_SITE_ADDR etc.).
     let conf = get_configuration(None).expect("failed to read leptos configuration");
@@ -75,6 +77,7 @@ async fn main() {
         engine,
         config: config.clone(),
         key,
+        pvr,
     };
 
     let routes = generate_route_list(App);

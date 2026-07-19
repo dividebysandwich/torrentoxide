@@ -9,7 +9,7 @@ use crate::components::fx::chirp;
 use crate::components::scramble::Scramble;
 use crate::components::sparkline::Sparkline;
 use crate::components::{dashboard_state, ConfirmData};
-use crate::types::{fmt_bytes, fmt_eta, fmt_speed, TorrentState, TorrentView};
+use crate::types::{fmt_bytes, fmt_eta, fmt_speed, Category, TorrentState, TorrentView};
 
 /// Briefly set a boolean signal to drive a one-shot CSS effect.
 fn flash(sig: RwSignal<bool>, ms: u64) {
@@ -101,6 +101,28 @@ fn ratio(t: &TorrentView) -> f64 {
     }
 }
 
+/// Which category (if any) a torrent belongs to, by matching its output folder
+/// against each category's resolved directory (most specific wins).
+fn match_category(output_folder: &str, cats: &[Category], download_dir: &str) -> Option<String> {
+    let dl = download_dir.trim_end_matches('/');
+    let of = output_folder.trim_end_matches('/');
+    let mut best: Option<(&str, usize)> = None;
+    for c in cats {
+        let resolved = if dl.is_empty() {
+            c.subdir.trim_matches('/').to_string()
+        } else {
+            format!("{}/{}", dl, c.subdir.trim_matches('/'))
+        };
+        let resolved = resolved.trim_end_matches('/');
+        if of == resolved || of.starts_with(&format!("{resolved}/")) {
+            if best.map(|(_, bl)| resolved.len() > bl).unwrap_or(true) {
+                best = Some((c.slug.as_str(), resolved.len()));
+            }
+        }
+    }
+    best.map(|(s, _)| s.to_string())
+}
+
 #[component]
 pub fn TorrentList() -> impl IntoView {
     let state = dashboard_state();
@@ -108,6 +130,7 @@ pub fn TorrentList() -> impl IntoView {
     // Client-side list controls (low-friction filter + sort).
     let query = RwSignal::new(String::new());
     let status = RwSignal::new(StatusFilter::All);
+    let cat_filter = RwSignal::new(String::new()); // "" = all, "-" = uncategorized, else slug
     let sort_key = RwSignal::new(SortKey::Added);
     let sort_desc = RwSignal::new(false);
 
@@ -116,13 +139,26 @@ pub fn TorrentList() -> impl IntoView {
         let snap = state.snapshot.get();
         let q = query.get().trim().to_lowercase();
         let sf = status.get();
+        let cat = cat_filter.get();
+        let cats = state.categories.get();
+        let dl = state.defaults.get().download_dir;
         let key = sort_key.get();
         let desc = sort_desc.get();
+
+        let cat_ok = |t: &TorrentView| match cat.as_str() {
+            "" => true,
+            "-" => match_category(&t.output_folder, &cats, &dl).is_none(),
+            slug => match_category(&t.output_folder, &cats, &dl).as_deref() == Some(slug),
+        };
 
         let mut v: Vec<TorrentView> = snap
             .torrents
             .into_iter()
-            .filter(|t| (q.is_empty() || t.name.to_lowercase().contains(&q)) && sf.matches(t.state))
+            .filter(|t| {
+                (q.is_empty() || t.name.to_lowercase().contains(&q))
+                    && sf.matches(t.state)
+                    && cat_ok(t)
+            })
             .collect();
 
         v.sort_by(|a, b| {
@@ -196,6 +232,32 @@ pub fn TorrentList() -> impl IntoView {
                             })
                             .collect_view()}
                     </div>
+                    {move || {
+                        (!state.categories.get().is_empty()).then(|| {
+                            view! {
+                                <select
+                                    class="sort-select"
+                                    prop:value=move || cat_filter.get()
+                                    on:change=move |e| cat_filter.set(event_target_value(&e))
+                                >
+                                    <option value="">"ALL CATS"</option>
+                                    <option value="-">"UNCATEGORIZED"</option>
+                                    {move || {
+                                        state
+                                            .categories
+                                            .get()
+                                            .iter()
+                                            .map(|c| {
+                                                view! {
+                                                    <option value=c.slug.clone()>{c.name.clone()}</option>
+                                                }
+                                            })
+                                            .collect_view()
+                                    }}
+                                </select>
+                            }
+                        })
+                    }}
                     <div class="sort-controls">
                         <span class="sort-label">"SORT"</span>
                         <select

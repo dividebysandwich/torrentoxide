@@ -22,7 +22,7 @@ pub mod wanted_page;
 
 use leptos::prelude::*;
 
-use crate::types::{Defaults, StatsSnapshot};
+use crate::types::{Category, Defaults, StatsSnapshot};
 
 /// A pending destructive action awaiting confirmation.
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +49,8 @@ pub struct DashboardState {
     pub confirm: RwSignal<Option<ConfirmData>>,
     /// Id of the torrent whose detail inspector is open, if any.
     pub detail_id: RwSignal<Option<u64>>,
+    /// User-defined categories (loaded once; refreshed by the settings page).
+    pub categories: RwSignal<Vec<Category>>,
 }
 
 impl Default for DashboardState {
@@ -65,6 +67,7 @@ impl DashboardState {
             connected: RwSignal::new(false),
             confirm: RwSignal::new(None),
             detail_id: RwSignal::new(None),
+            categories: RwSignal::new(Vec::new()),
         }
     }
 

@@ -72,6 +72,43 @@ pub struct StatsSnapshot {
     pub torrents: Vec<TorrentView>,
 }
 
+/// What kind of media a category holds (drives library grouping later).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MediaKind {
+    Movie,
+    Tv,
+    Other,
+}
+
+impl Default for MediaKind {
+    fn default() -> Self {
+        MediaKind::Other
+    }
+}
+
+impl MediaKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            MediaKind::Movie => "movie",
+            MediaKind::Tv => "tv",
+            MediaKind::Other => "other",
+        }
+    }
+}
+
+/// A user-defined category mapping to a sub-directory under the download folder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Category {
+    /// Stable key (server-derived from `name`).
+    #[serde(default)]
+    pub slug: String,
+    pub name: String,
+    /// Path relative to the download folder (e.g. `Movies`, `TV/Anime`).
+    pub subdir: String,
+    #[serde(default)]
+    pub kind: MediaKind,
+}
+
 /// Live-adjustable, persisted global settings (rate limits, seeding goals).
 /// Stored server-side in `<PERSISTENCE_DIR>/torrentoxide.json`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

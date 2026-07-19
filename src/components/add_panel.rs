@@ -7,19 +7,39 @@ use leptos::task::spawn_local;
 use crate::api::add_torrent;
 use crate::components::add_file_select::AddFileSelect;
 use crate::components::dir_picker::DirPicker;
+use crate::components::dashboard_state;
 use crate::types::{AddRequest, FileEntry};
 
 /// Panel for adding torrents by magnet link, http(s) URL, or `.torrent` upload,
 /// optionally choosing which files to download first.
 #[component]
 pub fn AddTorrentPanel() -> impl IntoView {
+    let state = dashboard_state();
     let source = RwSignal::new(String::new());
     let paused = RwSignal::new(false);
     let select_files = RwSignal::new(false);
     let has_file = RwSignal::new(false);
     let status = RwSignal::new(String::new());
     let picker_open = RwSignal::new(false);
+    let category = RwSignal::new(String::new());
     let file_ref: NodeRef<html::Input> = NodeRef::new();
+
+    // The directory the picker should open at: the selected category's folder
+    // (download dir + subdir), or None to fall back to the default download dir.
+    let cat_start = move || {
+        let slug = category.get();
+        if slug.is_empty() {
+            return None;
+        }
+        let dl = state.defaults.get().download_dir;
+        state.categories.get().iter().find(|c| c.slug == slug).map(|c| {
+            if dl.is_empty() {
+                c.subdir.clone()
+            } else {
+                format!("{}/{}", dl.trim_end_matches('/'), c.subdir)
+            }
+        })
+    };
 
     // --- file-selection modal state ---
     let fsel_open = RwSignal::new(false);
@@ -82,6 +102,21 @@ pub fn AddTorrentPanel() -> impl IntoView {
                     prop:value=move || source.get()
                     on:input=move |e| source.set(event_target_value(&e))
                 />
+                <select
+                    class="sort-select"
+                    prop:value=move || category.get()
+                    on:change=move |e| category.set(event_target_value(&e))
+                >
+                    <option value="">"— no category —"</option>
+                    {move || {
+                        state
+                            .categories
+                            .get()
+                            .iter()
+                            .map(|c| view! { <option value=c.slug.clone()>{c.name.clone()}</option> })
+                            .collect_view()
+                    }}
+                </select>
                 <label class="file-btn">
                     <span>{move || if has_file.get() { "✓ .torrent" } else { "📄 .torrent" }}</span>
                     <input
@@ -117,7 +152,7 @@ pub fn AddTorrentPanel() -> impl IntoView {
                 </button>
             </div>
             <p class="add-status">{move || status.get()}</p>
-            <DirPicker open=picker_open on_select=on_dir_selected/>
+            <DirPicker open=picker_open on_select=on_dir_selected start=Signal::derive(cat_start)/>
             <AddFileSelect
                 open=fsel_open
                 files=probe_files

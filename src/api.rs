@@ -4,7 +4,7 @@
 use leptos::prelude::*;
 
 use crate::types::{
-    AddRequest, Defaults, DirListing, FileEntry, Settings, TorrentDetail, TorrentView,
+    AddRequest, Category, Defaults, DirListing, FileEntry, Settings, TorrentDetail, TorrentView,
 };
 
 #[server]
@@ -145,6 +145,36 @@ pub async fn update_torrent_files(id: u64, files: Vec<usize>) -> Result<(), Serv
         .engine
         .update_files(id, files)
         .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn list_categories() -> Result<Vec<Category>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .list_categories()
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn upsert_category(category: Category) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .upsert_category(category)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn delete_category(slug: String) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .delete_category(&slug)
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 

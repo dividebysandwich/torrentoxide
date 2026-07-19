@@ -332,6 +332,87 @@ code {
   letter-spacing: 0.5px;
 }
 
+// ---- settings page -----------------------------------------------------
+
+.settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.2rem;
+}
+.settings-section {
+  @include framed(14px, 1.5px, var(--panel), rgba(255, 43, 77, 0.4), var(--glow-red));
+  padding: 1.2rem 1.4rem;
+  .page-title {
+    text-align: left;
+    font-size: 1.1rem;
+    margin-bottom: 0.4rem;
+  }
+}
+.settings-hint {
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  letter-spacing: 0.3px;
+  margin: 0 0 1rem;
+}
+.cat-form {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.cat-list {
+  margin-top: 0.9rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.cat-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid rgba(36, 227, 255, 0.18);
+  background: rgba(4, 8, 14, 0.6);
+  @include cut(6px);
+}
+.cat-kind {
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 0.14rem 0.45rem;
+  border: 1px solid currentColor;
+  white-space: nowrap;
+  @include cut(4px);
+  &.k-movie {
+    color: var(--yellow);
+  }
+  &.k-tv {
+    color: var(--cyan);
+  }
+  &.k-other {
+    color: var(--ink-dim);
+  }
+}
+.cat-name {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  flex: 0 0 auto;
+}
+.cat-subdir {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--cyan);
+  font-size: 0.82rem;
+  background: rgba(4, 8, 14, 0.85);
+  border: 1px solid rgba(36, 227, 255, 0.2);
+  padding: 0.2rem 0.45rem;
+  @include cut(4px);
+}
+
 .content {
   display: flex;
   flex-direction: column;
