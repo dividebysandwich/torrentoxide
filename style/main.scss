@@ -451,6 +451,20 @@ code {
   margin: 0.6rem 0;
   flex-wrap: wrap;
 }
+.warn-banner {
+  @include framed(12px, 1.5px, var(--panel), rgba(255, 210, 58, 0.55), rgba(255, 210, 58, 0.35));
+  padding: 0.8rem 1.1rem;
+  font-size: 0.9rem;
+  letter-spacing: 0.3px;
+  color: var(--ink);
+  strong {
+    color: var(--yellow);
+    letter-spacing: 0.5px;
+  }
+  b {
+    color: var(--cyan);
+  }
+}
 .rel-title {
   flex: 1 1 auto;
   min-width: 0;

@@ -5,7 +5,8 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{
-    add_wanted, list_quality_profiles, list_wanted, remove_wanted, run_monitor_now, tmdb_search,
+    add_wanted, list_indexers, list_quality_profiles, list_wanted, remove_wanted, run_monitor_now,
+    tmdb_search,
 };
 use crate::components::dashboard_state;
 use crate::types::{MediaSearchResult, QualityProfile, WantedItem, WantedKind};
@@ -20,6 +21,8 @@ pub fn WantedPage() -> impl IntoView {
     let profile = RwSignal::new(String::new());
     let category = RwSignal::new(String::new());
     let status = RwSignal::new(String::new());
+    // Assume configured until we learn otherwise (avoids a warning flash).
+    let has_indexers = RwSignal::new(true);
 
     let reload = move || {
         spawn_local(async move {
@@ -28,6 +31,9 @@ pub fn WantedPage() -> impl IntoView {
             }
             if let Ok(p) = list_quality_profiles().await {
                 profiles.set(p);
+            }
+            if let Ok(ix) = list_indexers().await {
+                has_indexers.set(ix.iter().any(|i| i.enabled));
             }
         });
     };
@@ -91,10 +97,16 @@ pub fn WantedPage() -> impl IntoView {
 
     view! {
         <div class="settings-page">
+            {move || (!has_indexers.get()).then(|| view! {
+                <div class="warn-banner">
+                    <strong>"No indexers configured — auto-download is off."</strong>
+                    " Your Wanted list still powers the "<b>"Calendar"</b>" (upcoming episode air dates), but the monitor can't fetch anything until you add a Torznab indexer on the "<b>"Feeds"</b>" page."
+                </div>
+            })}
             <section class="panel settings-section">
                 <h2 class="page-title">"ADD WANTED"</h2>
                 <p class="settings-hint">
-                    "Search TMDb, pick a quality profile + category, then add a movie or series. The monitor checks indexers a few times a day for missing episodes and quality upgrades (needs a TMDb key for episode air dates)."
+                    "Track movies and TV shows you want. Monitored series populate the Calendar with episode air dates (TMDb), and — when a Torznab indexer is configured — the monitor auto-downloads missing episodes and quality upgrades a few times a day. Pick a quality profile + category so grabs land in the right place."
                 </p>
                 <div class="cat-form">
                     <input class="text-input grow" r#type="text" placeholder="search movies & TV…"
