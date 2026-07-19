@@ -252,13 +252,41 @@ impl Pvr {
             }
         });
 
-        // Import finished TV downloads into Show/Season folders.
+        // Import finished TV downloads into Show/Season folders. This periodic
+        // sweep is a safety net; completions are normally imported promptly by
+        // the completion-driven importer below.
         let importer = pvr.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(IMPORT_INTERVAL);
             loop {
                 interval.tick().await;
                 importer.import_and_reap().await;
+            }
+        });
+
+        // Import as soon as a download finishes, so completed automated grabs
+        // land in the library without waiting for the sweep or a manual click.
+        let auto_import = pvr.clone();
+        tokio::spawn(async move {
+            let mut rx = auto_import.engine.subscribe_finished();
+            loop {
+                match rx.recv().await {
+                    Ok(_id) => {
+                        // Let the finished state settle, then coalesce any burst of
+                        // simultaneous completions into a single import pass.
+                        tokio::time::sleep(Duration::from_secs(3)).await;
+                        while rx.try_recv().is_ok() {}
+                        if auto_import.import_and_reap().await > 0 {
+                            // Refresh the library so the new files show up / stop
+                            // being re-considered by the monitor.
+                            let p = auto_import.clone();
+                            let _ = tokio::task::spawn_blocking(move || p.scan_library()).await;
+                            tracing::info!("auto-imported finished download(s) into the library");
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
             }
         });
 

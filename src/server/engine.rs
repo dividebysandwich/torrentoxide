@@ -105,12 +105,17 @@ pub struct Engine {
     /// Torrents held paused by the download queue (max-active-downloads). These
     /// are surfaced as `Queued` and auto-resumed when a slot frees.
     queued: Mutex<HashSet<usize>>,
+    /// Torrents already reported as finished, so each fires the completion event
+    /// (prompt library import) exactly once.
+    finished_seen: Mutex<HashSet<usize>>,
     /// Cached (free, total) bytes on the download filesystem, refreshed at 1 Hz.
     disk: Mutex<(u64, u64)>,
     /// Latest snapshot (with embedded history); updated by the sampler, relayed by SSE.
     tx: watch::Sender<Arc<StatsSnapshot>>,
     /// Notifies subscribers (the PVR) when a background add fails.
     add_failed_tx: broadcast::Sender<AddFailure>,
+    /// Notifies subscribers (the PVR) when a torrent finishes downloading.
+    finished_tx: broadcast::Sender<u64>,
 }
 
 impl Engine {
@@ -142,6 +147,7 @@ impl Engine {
 
         let (tx, _rx) = watch::channel(Arc::new(StatsSnapshot::default()));
         let (add_failed_tx, _) = broadcast::channel(64);
+        let (finished_tx, _) = broadcast::channel(64);
         let engine = Arc::new(Self {
             api,
             config,
@@ -152,9 +158,11 @@ impl Engine {
             settings_path,
             ratio_paused: Mutex::new(HashSet::new()),
             queued: Mutex::new(HashSet::new()),
+            finished_seen: Mutex::new(HashSet::new()),
             disk: Mutex::new(read_disk(&disk_dir)),
             tx,
             add_failed_tx,
+            finished_tx,
         });
 
         // Sample + broadcast 4×/second (independent of any connected client);
@@ -173,6 +181,10 @@ impl Engine {
                     tokio::spawn(async move {
                         let _ = e.pause(id).await;
                     });
+                }
+                // Notify subscribers about torrents that just finished (prompt import).
+                for id in sampler.note_finished(&snapshot) {
+                    let _ = sampler.finished_tx.send(id);
                 }
                 // Enforce the download queue at ~1 Hz (states settle between ticks,
                 // avoiding pause/resume churn): pause excess, promote waiting ones.
@@ -334,6 +346,43 @@ impl Engine {
     /// recover a stalled auto-download by grabbing an alternative release).
     pub fn subscribe_add_failures(&self) -> broadcast::Receiver<AddFailure> {
         self.add_failed_tx.subscribe()
+    }
+
+    /// Ids of torrents that have just transitioned to finished (each reported
+    /// once). Drives prompt, event-driven library import.
+    fn note_finished(&self, snapshot: &StatsSnapshot) -> Vec<u64> {
+        let mut seen = self.finished_seen.lock().unwrap();
+        let live: HashSet<usize> = snapshot
+            .torrents
+            .iter()
+            .filter(|t| !t.pending)
+            .map(|t| t.id as usize)
+            .collect();
+        seen.retain(|id| live.contains(id));
+
+        let mut out = Vec::new();
+        for t in &snapshot.torrents {
+            if t.pending {
+                continue;
+            }
+            let uid = t.id as usize;
+            if matches!(t.state, TorrentState::Finished) {
+                // insert() returns true the first time this id is seen finished.
+                if seen.insert(uid) {
+                    out.push(t.id);
+                }
+            } else {
+                // Left the finished state (e.g. re-checking) — allow a later re-fire.
+                seen.remove(&uid);
+            }
+        }
+        out
+    }
+
+    /// Subscribe to torrent-completion notifications (used by the PVR to import
+    /// finished downloads into the library without waiting for the periodic sweep).
+    pub fn subscribe_finished(&self) -> broadcast::Receiver<u64> {
+        self.finished_tx.subscribe()
     }
 
     /// Change which files a running torrent downloads (per-file selection).
