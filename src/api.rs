@@ -371,7 +371,8 @@ pub async fn list_wanted() -> Result<Vec<WantedItem>, ServerFnError> {
     let state = expect_context::<AppState>();
     state
         .pvr
-        .list_wanted()
+        .list_wanted_backfilled()
+        .await
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 

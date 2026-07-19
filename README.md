@@ -1,8 +1,6 @@
 # TorrentOxide
 
-A self-hostable web-driven BitTorrent client built in Rust with
-[**Leptos**](https://leptos.dev) (SSR + hydration) and the 
-[**librqbit**](https://github.com/ikatson/rqbit) torrent engine.
+A cyberpunk self-hostable web-driven BitTorrent client and PVR built in Rust.
 
 ![stack](https://img.shields.io/badge/rust-leptos%200.8-orange) ![engine](https://img.shields.io/badge/engine-librqbit%208-blueviolet)
 

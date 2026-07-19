@@ -564,6 +564,29 @@ impl Pvr {
         self.store.list_wanted()
     }
 
+    /// List wanted items, backfilling any missing poster from TMDb (by tmdb id)
+    /// and persisting it — so items added before posters were captured get a
+    /// thumbnail without the user having to re-add them. One-time per item:
+    /// once persisted, later calls skip the lookups.
+    pub async fn list_wanted_backfilled(&self) -> Result<Vec<WantedItem>> {
+        let mut items = self.store.list_wanted()?;
+        let Some(key) = self.tmdb_key() else {
+            return Ok(items);
+        };
+        for w in items.iter_mut() {
+            let has_poster = w.poster_path.as_deref().is_some_and(|p| !p.trim().is_empty());
+            if has_poster {
+                continue;
+            }
+            let is_tv = matches!(w.kind, WantedKind::Series);
+            if let Ok(Some(poster)) = self.meta.poster_by_id(&key, w.tmdb_id, is_tv).await {
+                w.poster_path = Some(poster);
+                let _ = self.store.upsert_wanted(w);
+            }
+        }
+        Ok(items)
+    }
+
     pub fn add_wanted(&self, mut w: WantedItem) -> Result<()> {
         w.title = w.title.trim().to_string();
         if w.title.is_empty() {

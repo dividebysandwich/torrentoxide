@@ -36,6 +36,22 @@ impl MetadataClient {
         }
     }
 
+    /// Fetch the poster path for a movie/series by TMDb id — used to backfill
+    /// wanted items saved before posters were captured.
+    pub async fn poster_by_id(&self, key: &str, tmdb_id: i64, is_tv: bool) -> Result<Option<String>> {
+        let kind = if is_tv { "tv" } else { "movie" };
+        let body: PosterResp = self
+            .http
+            .get(format!("{TMDB_BASE}/{kind}/{tmdb_id}"))
+            .query(&[("api_key", key)])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+        Ok(body.poster_path.filter(|p| !p.trim().is_empty()))
+    }
+
     /// Search movies + TV shows by free-text title.
     pub async fn search(&self, key: &str, query: &str) -> Result<Vec<MediaSearchResult>> {
         let body: SearchResp = self
@@ -189,6 +205,11 @@ struct TvEpisode {
     air_date: Option<String>,
     #[serde(default)]
     name: String,
+}
+
+#[derive(Deserialize)]
+struct PosterResp {
+    poster_path: Option<String>,
 }
 
 #[derive(Deserialize)]
