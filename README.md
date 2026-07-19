@@ -23,6 +23,7 @@ A self-hostable web-driven BitTorrent client built in Rust with
 - **Basic authentication support** - Protect access with a username/password in `.env`. Or don't, if you don't expose it to the outside.
 - **Live updates** over Server-Sent Events (no manual refresh).
 - **Persistence** - torrents resume across restarts.
+- **Built-in PVR** - Sonarr/Radarr-style automation: categories, quality profiles, Torznab indexers + RSS auto-download, a media library, a wanted list with quality upgrades, an episode monitor, and a release calendar ([see below](#media-library--automation-pvr)).
 
 ## Run with Docker (recommended)
 
@@ -160,14 +161,82 @@ cargo leptos build --release
 # (see the Dockerfile for the exact variables)
 ```
 
+## Media library & automation (PVR)
+
+Beyond a plain torrent client, TorrentOxide has a Sonarr/Radarr-style automation
+layer, reachable from the top navigation. All of its data lives in an embedded
+database at `<PERSISTENCE_DIR>/pvr.redb`. Nothing here is required — the client
+works fine without touching any of it.
+
+### Settings
+
+- **Categories** — map a name (e.g. *Movies*, *TV Shows*) to a sub-folder under
+  the download directory, tagged as **Movie**, **TV**, or **Other**. New
+  downloads can target a category (which sets the save folder), the torrent list
+  can be filtered by category, and the category *kind* drives how the library
+  classifies files.
+- **Quality profiles** — define what releases are acceptable and how upgrades are
+  chosen: a minimum and a cutoff resolution, an HDR preference
+  (*ignore / prefer / require*), required languages, and whether upgrades are
+  allowed. Resolution is primary, HDR a strong secondary preference — e.g.
+  *"accept SDR now, upgrade to HDR when it appears"* = min 720p, cutoff 1080p,
+  HDR *prefer*, language *english*.
+- **Providers** — a free **TMDb API key** (from
+  [themoviedb.org](https://www.themoviedb.org/settings/api)) powers library
+  identification, the calendar, and the episode monitor. A key set here overrides
+  the `TMDB_API_KEY` `.env` value.
+
+### Feeds & indexers
+
+- **Torznab indexers** — point at a Jackett/Prowlarr endpoint (e.g.
+  `http://127.0.0.1:9117/api/v2.0/indexers/all/results/torznab/`) with its API
+  key; **Test** verifies the connection. Indexers power the manual **Search** and
+  the wanted-list monitor.
+- **RSS feeds** — subscribe to an RSS/Torznab feed with a category, a quality
+  profile, and an auto-download toggle. A background poller (interval
+  configurable on the page) grabs acceptable new items into the category;
+  episodes already on disk are skipped and grabs are de-duplicated. Feeds can be
+  edited or deleted.
+- A **grab history** shows what was fetched and from where.
+
+### Wanted & Calendar
+
+- **Wanted** — search TMDb and add a **movie** or **series** to monitor, with a
+  quality profile + category. A background monitor runs a few times a day: for a
+  series it uses TMDb air dates to find aired-but-missing episodes, searches your
+  indexers, and grabs the best acceptable release (upgrading anything below the
+  cutoff). **Without a Torznab indexer configured, the wanted list only powers
+  the Calendar.**
+- **Calendar** — a month grid of upcoming/recent episode air dates for your
+  monitored series (via TMDb).
+
+### Library & import
+
+- **Library** — scans the download tree into **Movies** and **TV Shows**
+  (separate tabs). Classification uses the category *kind* first, then folder
+  layout (`TV Shows/<Show>/…`), then filename parsing (handles `S01E04`, `1x04`,
+  `SxxMxx` specials, and absolute anime numbering); episodes are grouped by show.
+  Rescans run hourly or on demand.
+- **Import** — organizes finished TV downloads into
+  `<category>/<Show>/Season NN/<Show> - SxxEyy.ext`, matching an existing show
+  folder when possible. Pick the mode on the Library page:
+  - **Move** *(default)* — relocates the file so there's a single clean copy, and
+    forgets the torrent so it isn't re-downloaded. Best when your download folder
+    **is** the folder your media server (Jellyfin/Plex) scans.
+  - **Hardlink** — links the file into place and keeps the download seedable. Best
+    when your download folder is **separate** from the library your media server
+    scans (otherwise it would see the original and the link as duplicates).
+  - **Copy** — a full second copy (doubles disk), keeps seeding.
+
 ## Configuration (`.env`)
 
 | Variable            | Default            | Purpose                                                        |
 | ------------------- | ------------------ | -------------------------------------------------------------- |
 | `DOWNLOAD_DIR`      | `./downloads`      | Default folder new torrents download into.                     |
 | `BROWSE_ROOT`       | = `DOWNLOAD_DIR`   | Root the remote directory browser is confined to.              |
-| `PERSISTENCE_DIR`   | `./.rqbit-session` | Where session state is stored so torrents resume on restart.   |
+| `PERSISTENCE_DIR`   | `./.rqbit-session` | Where session + PVR state is stored (`pvr.redb` lives here).   |
 | `LEPTOS_SITE_ADDR`  | `127.0.0.1:3000`   | Address the server binds to.                                   |
+| `TMDB_API_KEY`      | *(unset)*          | Optional TMDb key for the library/wanted/calendar features (also settable in the UI). |
 | `AUTH_USERNAME`     | *(unset)*          | Set together with `AUTH_PASSWORD` to require login.            |
 | `AUTH_PASSWORD`     | *(unset)*          | Auth is **disabled** unless both are set.                      |
 | `SESSION_SECRET`    | *(random)*         | Signs session cookies; set a long random value in production.  |
