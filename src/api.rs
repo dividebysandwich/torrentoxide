@@ -4,7 +4,8 @@
 use leptos::prelude::*;
 
 use crate::types::{
-    AddRequest, Category, Defaults, DirListing, FileEntry, Settings, TorrentDetail, TorrentView,
+    AddRequest, Category, Defaults, DirListing, FileEntry, MediaSearchResult, ProviderInfo,
+    QualityProfile, Settings, TorrentDetail, TorrentView,
 };
 
 #[server]
@@ -175,6 +176,75 @@ pub async fn delete_category(slug: String) -> Result<(), ServerFnError> {
     state
         .pvr
         .delete_category(&slug)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn list_quality_profiles() -> Result<Vec<QualityProfile>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .list_quality_profiles()
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn upsert_quality_profile(profile: QualityProfile) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .upsert_quality_profile(profile)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn delete_quality_profile(id: String) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .delete_quality_profile(&id)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn get_provider_info() -> Result<ProviderInfo, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    Ok(state.pvr.provider_info())
+}
+
+#[server]
+pub async fn set_tmdb_key(key: String) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .set_tmdb_key(key)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn test_tmdb() -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .test_tmdb()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn tmdb_search(query: String) -> Result<Vec<MediaSearchResult>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .tmdb_search(&query)
+        .await
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 

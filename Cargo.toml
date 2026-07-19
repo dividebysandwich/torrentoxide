@@ -57,6 +57,12 @@ librqbit = { version = "8", optional = true, default-features = false, features 
 dotenvy = { version = "0.15", optional = true }
 fs4 = { version = "1", optional = true }
 redb = { version = "2", optional = true }
+reqwest = { version = "0.12", optional = true, default-features = false, features = [
+  "rustls-tls",
+  "json",
+] }
+torrent-name-parser = { version = "0.12", optional = true }
+regex = { version = "1", optional = true }
 async-stream = { version = "0.3", optional = true }
 futures = { version = "0.3", optional = true }
 tracing = { version = "0.1", optional = true }
@@ -90,6 +96,9 @@ ssr = [
   "dep:dotenvy",
   "dep:fs4",
   "dep:redb",
+  "dep:reqwest",
+  "dep:torrent-name-parser",
+  "dep:regex",
   "dep:async-stream",
   "dep:futures",
   "dep:tracing",

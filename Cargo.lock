@@ -3680,6 +3680,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "torrent-name-parser"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2db832ca29f7c5c063a8678bc82f50d50abd6c33af3246ab34a3169e5f5ee51"
+dependencies = [
+ "lazy_static",
+ "regex",
+]
+
+[[package]]
 name = "torrentoxide"
 version = "0.2.0"
 dependencies = [
@@ -3701,9 +3711,12 @@ dependencies = [
  "leptos_router",
  "librqbit",
  "redb",
+ "regex",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",
+ "torrent-name-parser",
  "tower",
  "tower-http",
  "tracing",

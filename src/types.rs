@@ -109,6 +109,133 @@ pub struct Category {
     pub kind: MediaKind,
 }
 
+/// Video resolution tiers, ordered worst → best (discriminants used for ranking).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Resolution {
+    Unknown = 0,
+    R480 = 1,
+    R720 = 2,
+    R1080 = 3,
+    R2160 = 4,
+}
+
+impl Resolution {
+    pub const ALL: [Resolution; 5] = [
+        Self::Unknown,
+        Self::R480,
+        Self::R720,
+        Self::R1080,
+        Self::R2160,
+    ];
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Unknown => "any",
+            Self::R480 => "480p",
+            Self::R720 => "720p",
+            Self::R1080 => "1080p",
+            Self::R2160 => "2160p",
+        }
+    }
+    pub fn rank(&self) -> i64 {
+        *self as i64
+    }
+}
+
+/// Release source tiers, ordered worst → best.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Source {
+    Unknown = 0,
+    Cam = 1,
+    Hdtv = 2,
+    WebRip = 3,
+    WebDl = 4,
+    Bluray = 5,
+    Remux = 6,
+}
+
+impl Source {
+    pub fn rank(&self) -> i64 {
+        *self as i64
+    }
+}
+
+/// How a quality profile treats HDR / Dolby Vision.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum HdrPref {
+    /// Don't care.
+    Ignore,
+    /// Accept SDR, but rank HDR higher and treat it as an upgrade target.
+    Prefer,
+    /// Only accept HDR / DV releases.
+    Require,
+}
+
+impl Default for HdrPref {
+    fn default() -> Self {
+        HdrPref::Prefer
+    }
+}
+
+impl HdrPref {
+    pub const ALL: [HdrPref; 3] = [Self::Ignore, Self::Prefer, Self::Require];
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Ignore => "ignore",
+            Self::Prefer => "prefer",
+            Self::Require => "require",
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// A quality profile: what releases are acceptable and how upgrades are chosen.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QualityProfile {
+    /// Stable id (server-derived from name if empty).
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    /// Minimum acceptable resolution (inclusive).
+    pub min_resolution: Resolution,
+    /// Stop upgrading once this resolution (and HDR pref, if any) is met.
+    pub cutoff_resolution: Resolution,
+    #[serde(default)]
+    pub hdr: HdrPref,
+    /// Required languages (release must match one when non-empty; an untagged
+    /// release is assumed to match). Free-form, e.g. `english`.
+    #[serde(default)]
+    pub languages: Vec<String>,
+    #[serde(default)]
+    pub preferred_groups: Vec<String>,
+    #[serde(default)]
+    pub blocked_groups: Vec<String>,
+    #[serde(default = "default_true")]
+    pub upgrade_allowed: bool,
+}
+
+/// One TMDb search hit (movie or TV), surfaced to the wanted/library UI.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MediaSearchResult {
+    pub tmdb_id: i64,
+    pub title: String,
+    pub year: Option<i32>,
+    #[serde(default)]
+    pub overview: String,
+    pub poster_path: Option<String>,
+    pub is_tv: bool,
+}
+
+/// Provider status surfaced to the UI (never exposes the raw key).
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+pub struct ProviderInfo {
+    pub tmdb_key_set: bool,
+    /// Result of the last connection test, if any (`Ok`/error message).
+    pub tmdb_status: Option<String>,
+}
+
 /// Live-adjustable, persisted global settings (rate limits, seeding goals).
 /// Stored server-side in `<PERSISTENCE_DIR>/torrentoxide.json`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
