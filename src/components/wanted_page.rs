@@ -11,6 +11,28 @@ use crate::api::{
 use crate::components::dashboard_state;
 use crate::types::{MediaSearchResult, QualityProfile, WantedItem, WantedKind};
 
+/// A small movie/show poster thumbnail (TMDb), with a kind-based placeholder
+/// when no poster is available.
+fn poster_thumb(poster: Option<String>, is_tv: bool) -> impl IntoView {
+    match poster.filter(|p| !p.trim().is_empty()) {
+        Some(p) => view! {
+            <img
+                class="wanted-thumb"
+                loading="lazy"
+                src=format!("https://image.tmdb.org/t/p/w92{p}")
+                alt=""
+            />
+        }
+        .into_any(),
+        None => view! {
+            <span class="wanted-thumb wanted-thumb-none">
+                {if is_tv { "📺" } else { "🎬" }}
+            </span>
+        }
+        .into_any(),
+    }
+}
+
 #[component]
 pub fn WantedPage() -> impl IntoView {
     let state = dashboard_state();
@@ -68,6 +90,7 @@ pub fn WantedPage() -> impl IntoView {
             tmdb_id: res.tmdb_id,
             title: res.title,
             year: res.year,
+            poster_path: res.poster_path,
             quality_profile: profile.get(),
             category: category.get(),
             monitored: true,
@@ -131,6 +154,7 @@ pub fn WantedPage() -> impl IntoView {
                 <div class="cat-list">
                     <For each=move || results.get() key=|r| r.tmdb_id let:r>
                         <div class="cat-row">
+                            {poster_thumb(r.poster_path.clone(), r.is_tv)}
                             <span class=if r.is_tv { "cat-kind k-tv" } else { "cat-kind k-movie" }>
                                 {if r.is_tv { "series" } else { "movie" }}
                             </span>
@@ -151,6 +175,7 @@ pub fn WantedPage() -> impl IntoView {
                 <div class="cat-list">
                     <For each=move || wanted.get() key=|w| w.id.clone() let:w>
                         <div class="cat-row">
+                            {poster_thumb(w.poster_path.clone(), matches!(w.kind, WantedKind::Series))}
                             <span class=if matches!(w.kind, WantedKind::Series) { "cat-kind k-tv" } else { "cat-kind k-movie" }>
                                 {w.kind.label()}
                             </span>

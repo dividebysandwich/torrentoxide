@@ -402,6 +402,9 @@ pub struct WantedItem {
     pub tmdb_id: i64,
     pub title: String,
     pub year: Option<i32>,
+    /// TMDb poster path (e.g. `/abc.jpg`) for the list thumbnail, if known.
+    #[serde(default)]
+    pub poster_path: Option<String>,
     #[serde(default)]
     pub quality_profile: String,
     #[serde(default)]
