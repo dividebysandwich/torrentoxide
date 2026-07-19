@@ -444,6 +444,13 @@ code {
   color: var(--ink-dim);
   white-space: nowrap;
 }
+.feed-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin: 0.6rem 0;
+  flex-wrap: wrap;
+}
 .rel-title {
   flex: 1 1 auto;
   min-width: 0;

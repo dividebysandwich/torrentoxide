@@ -46,7 +46,7 @@ fn cap_i32(re: &Regex, s: &str, group: usize) -> Option<i32> {
 }
 
 /// Extract (season, episode) from a filename with several fallbacks.
-fn extract_se(name: &str) -> (Option<i32>, Option<i32>) {
+pub(crate) fn extract_se(name: &str) -> (Option<i32>, Option<i32>) {
     if let Some(c) = RE_SXXEXX.captures(name) {
         return (
             c.get(1).and_then(|m| m.as_str().parse().ok()),

@@ -6,9 +6,9 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{
-    delete_feed, delete_indexer, grab_release, list_feeds, list_grab_history, list_indexers,
-    list_quality_profiles, poll_feeds_now, search_releases, test_indexer, upsert_feed,
-    upsert_indexer,
+    delete_feed, delete_indexer, get_feed_poll_mins, grab_release, list_feeds, list_grab_history,
+    list_indexers, list_quality_profiles, poll_feeds_now, search_releases, set_feed_poll_mins,
+    test_indexer, upsert_feed, upsert_indexer,
 };
 use crate::components::dashboard_state;
 use crate::types::{fmt_bytes, Indexer, QualityProfile, Release, RssFeed};
@@ -190,6 +190,9 @@ fn FeedsSection() -> impl IntoView {
     let profile = RwSignal::new(String::new());
     let auto = RwSignal::new(false);
     let status = RwSignal::new(String::new());
+    // Some(original id) while editing an existing feed.
+    let edit_id = RwSignal::new(None::<String>);
+    let poll_mins = RwSignal::new(15u32);
 
     let reload = move || {
         spawn_local(async move {
@@ -199,11 +202,23 @@ fn FeedsSection() -> impl IntoView {
             if let Ok(p) = list_quality_profiles().await {
                 profiles.set(p);
             }
+            if let Ok(m) = get_feed_poll_mins().await {
+                poll_mins.set(m);
+            }
         });
     };
     Effect::new(move |_| reload());
 
-    let add = move |_| {
+    let reset_form = move || {
+        name.set(String::new());
+        url.set(String::new());
+        category.set(String::new());
+        profile.set(String::new());
+        auto.set(false);
+        edit_id.set(None);
+    };
+
+    let save = move |_| {
         let feed = RssFeed {
             id: String::new(),
             name: name.get().trim().to_string(),
@@ -213,17 +228,30 @@ fn FeedsSection() -> impl IntoView {
             auto_download: auto.get(),
             enabled: true,
         };
+        let old = edit_id.get();
         spawn_local(async move {
+            // Renaming while editing changes the slug, so drop the old record.
+            if let Some(old_id) = old {
+                let _ = delete_feed(old_id).await;
+            }
             match upsert_feed(feed).await {
                 Ok(()) => {
-                    name.set(String::new());
-                    url.set(String::new());
+                    reset_form();
                     status.set("Saved.".into());
                     reload();
                 }
                 Err(e) => status.set(e.to_string()),
             }
         });
+    };
+    let edit = move |f: RssFeed| {
+        name.set(f.name);
+        url.set(f.url);
+        category.set(f.category);
+        profile.set(f.quality_profile);
+        auto.set(f.auto_download);
+        edit_id.set(Some(f.id));
+        status.set(String::new());
     };
     let del = move |id: String| {
         spawn_local(async move {
@@ -238,6 +266,13 @@ fn FeedsSection() -> impl IntoView {
                 Ok(n) => status.set(format!("Polled feeds — {n} new grab(s).")),
                 Err(e) => status.set(e.to_string()),
             }
+        });
+    };
+    let save_interval = move |e| {
+        let m = event_target_value(&e).trim().parse::<u32>().unwrap_or(15).max(1);
+        poll_mins.set(m);
+        spawn_local(async move {
+            let _ = set_feed_poll_mins(m).await;
         });
     };
 
@@ -271,8 +306,26 @@ fn FeedsSection() -> impl IntoView {
                         on:change=move |e| auto.set(event_target_checked(&e))/>
                     <span>"auto"</span>
                 </label>
-                <button class="btn btn-primary" on:click=add>"+ Add"</button>
-                <button class="btn btn-ghost" on:click=poll>"Poll now"</button>
+                <button class="btn btn-primary" on:click=save>
+                    {move || if edit_id.get().is_some() { "Save" } else { "+ Add" }}
+                </button>
+                {move || edit_id.get().is_some().then(|| view! {
+                    <button class="btn btn-ghost" on:click=move |_| reset_form()>"Cancel"</button>
+                })}
+            </div>
+            <div class="feed-toolbar">
+                <button class="btn btn-ghost btn-sm" on:click=poll>"Poll now"</button>
+                <label class="deck-field">
+                    <span class="deck-label">"POLL EVERY"</span>
+                    <input
+                        class="deck-input narrow"
+                        r#type="number"
+                        min="1"
+                        prop:value=move || poll_mins.get().to_string()
+                        on:change=save_interval
+                    />
+                    <span class="deck-unit">"MIN"</span>
+                </label>
             </div>
             <p class="add-status">{move || status.get()}</p>
             <div class="cat-list">
@@ -283,6 +336,8 @@ fn FeedsSection() -> impl IntoView {
                         </span>
                         <span class="cat-name">{f.name.clone()}</span>
                         <code class="cat-subdir">{f.url.clone()}</code>
+                        <button class="icon-btn" title="Edit feed"
+                            on:click={let ff = f.clone(); move |_| edit(ff.clone())}>"✎"</button>
                         <button class="icon-btn danger" title="Delete feed"
                             on:click={let id = f.id.clone(); move |_| del(id.clone())}>"🗑"</button>
                     </div>

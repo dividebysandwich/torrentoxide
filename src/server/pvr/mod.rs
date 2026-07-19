@@ -27,8 +27,9 @@ use meta::MetadataClient;
 use store::PvrStore;
 
 const TMDB_KEY: &str = "tmdb_api_key";
-/// How often enabled auto-download RSS feeds are polled.
-const FEED_POLL_INTERVAL: Duration = Duration::from_secs(900);
+const FEED_POLL_MINS_KEY: &str = "feed_poll_mins";
+/// Default feed poll cadence (minutes) when unconfigured.
+const DEFAULT_FEED_POLL_MINS: u64 = 15;
 /// How often the download tree is re-scanned into the library.
 const SCAN_INTERVAL: Duration = Duration::from_secs(3600);
 /// How often monitored wanted items are checked (≈4×/day).
@@ -108,9 +109,10 @@ impl Pvr {
 
         let poller = pvr.clone();
         tokio::spawn(async move {
-            let mut interval = tokio::time::interval(FEED_POLL_INTERVAL);
             loop {
-                interval.tick().await;
+                // Re-read the (runtime-configurable) cadence each cycle.
+                let mins = poller.feed_poll_mins().max(1);
+                tokio::time::sleep(Duration::from_secs(mins * 60)).await;
                 if let Err(e) = poller.poll_feeds().await {
                     tracing::warn!("feed poll error: {e}");
                 }
@@ -445,6 +447,22 @@ impl Pvr {
         self.store.delete_feed(id)
     }
 
+    /// Configured feed poll cadence in minutes (default 15).
+    pub fn feed_poll_mins(&self) -> u64 {
+        self.store
+            .get_config(FEED_POLL_MINS_KEY)
+            .ok()
+            .flatten()
+            .and_then(|s| s.parse::<u64>().ok())
+            .filter(|m| *m >= 1)
+            .unwrap_or(DEFAULT_FEED_POLL_MINS)
+    }
+
+    pub fn set_feed_poll_mins(&self, mins: u32) -> Result<()> {
+        self.store
+            .set_config(FEED_POLL_MINS_KEY, &mins.max(1).to_string())
+    }
+
     // --- grabbing / history ------------------------------------------------
 
     /// Resolve a category slug to an absolute download path (default dir if unset).
@@ -495,6 +513,7 @@ impl Pvr {
     pub async fn poll_feeds(&self) -> Result<usize> {
         let feeds = self.store.list_feeds()?;
         let profiles = self.store.list_quality_profiles()?;
+        let library = self.store.get_library().unwrap_or_default();
         let mut grabbed = 0usize;
 
         for f in feeds.iter().filter(|f| f.enabled && f.auto_download) {
@@ -509,6 +528,19 @@ impl Pvr {
             for item in items {
                 if self.store.history_contains(&item.url).unwrap_or(false) {
                     continue;
+                }
+                // Skip episodes already present on disk (best-effort match).
+                let parsed = quality::parse_release(&item.title);
+                let (season, episode) = if parsed.episode.is_some() {
+                    (parsed.season, parsed.episode)
+                } else {
+                    let (s, e) = scan::extract_se(&item.title);
+                    (parsed.season.or(s), e)
+                };
+                if let (Some(s), Some(e)) = (season, episode) {
+                    if library.has_episode(&parsed.title, s, e) {
+                        continue;
+                    }
                 }
                 let sc = match profile {
                     Some(prof) => match quality::score(&quality::parse_release(&item.title), prof) {

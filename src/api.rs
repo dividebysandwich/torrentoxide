@@ -346,6 +346,23 @@ pub async fn poll_feeds_now() -> Result<usize, ServerFnError> {
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
+#[server]
+pub async fn get_feed_poll_mins() -> Result<u32, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    Ok(state.pvr.feed_poll_mins() as u32)
+}
+
+#[server]
+pub async fn set_feed_poll_mins(mins: u32) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .set_feed_poll_mins(mins)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
 // --- wanted / monitor -------------------------------------------------------
 
 #[server]
