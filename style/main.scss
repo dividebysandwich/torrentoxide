@@ -2113,10 +2113,49 @@ code {
   line-height: 1.55;
 }
 .lt-line {
-  color: var(--green);
-  opacity: 0.9;
-  white-space: nowrap;
+  display: flex;
+  gap: 0.55rem;
+  align-items: baseline;
+  color: var(--ink);
+  opacity: 0.92;
   animation: lt-in 0.3s ease-out;
+}
+.lt-time {
+  flex: 0 0 auto;
+  color: var(--ink-dim);
+}
+.lt-level {
+  flex: 0 0 auto;
+  min-width: 3.4em;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--cyan);
+}
+.lt-msg {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+// severity tints
+.lt-line.lt-warn {
+  color: var(--yellow);
+  .lt-level {
+    color: var(--yellow);
+  }
+}
+.lt-line.lt-error {
+  color: var(--red-bright);
+  .lt-level {
+    color: var(--red-bright);
+  }
+}
+.lt-line.lt-debug,
+.lt-line.lt-trace {
+  color: var(--ink-dim);
+  opacity: 0.75;
+  .lt-level {
+    color: var(--ink-dim);
+  }
 }
 @keyframes lt-in {
   from {

@@ -447,6 +447,18 @@ impl Default for Settings {
     }
 }
 
+/// One captured log line (app + librqbit `tracing` output) for the system-log UI.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LogLine {
+    /// Monotonic id (used as a stable render key and for dedup).
+    pub id: u64,
+    /// `HH:MM:SS` local time.
+    pub time: String,
+    /// Level, e.g. `INFO` / `WARN` / `ERROR`.
+    pub level: String,
+    pub message: String,
+}
+
 /// One entry (sub-directory) inside a directory listing.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DirEntry {

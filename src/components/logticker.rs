@@ -1,112 +1,72 @@
-//! A terminal-style "system log" that narrates torrent events (add / state
-//! change / remove) diffed from the live snapshot, plus periodic flavor lines.
+//! A terminal-style "system log" that streams the real app + librqbit `tracing`
+//! output over `/api/logs` — buffered history on connect, then live — capped to
+//! the most recent lines so the browser stays responsive.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::VecDeque;
 
 use leptos::prelude::*;
 
-use crate::components::fx::{now_hms, rand_index};
-use crate::components::dashboard_state;
-use crate::types::TorrentState;
-
-const MAX_LINES: usize = 40;
-
-const FLAVOR: &[&str] = &[
-    "DHT UPLINK STABLE",
-    "PEER HANDSHAKE :: OK",
-    "PIECE VERIFIED :: SHA1 MATCH",
-    "TRACKER ANNOUNCE :: 200",
-    "ROUTING TABLE REFRESHED",
-    "KERNEL HEARTBEAT :: NOMINAL",
-    "NAT TRAVERSAL :: HOLEPUNCH OK",
-    "BLOCK REQUEST QUEUED",
-    "CHOKE ALGORITHM :: RECALC",
-];
-
-fn trunc(s: &str) -> String {
-    if s.chars().count() > 34 {
-        let t: String = s.chars().take(33).collect();
-        format!("{t}…")
-    } else {
-        s.to_string()
-    }
-}
-
-fn state_label(s: TorrentState) -> &'static str {
-    match s {
-        TorrentState::Initializing => "SYNC",
-        TorrentState::Live => "LIVE",
-        TorrentState::Paused => "SUSPENDED",
-        TorrentState::Finished => "COMPLETE",
-        TorrentState::Error => "FAULT",
-    }
-}
+use crate::types::LogLine;
 
 #[component]
 pub fn LogTicker() -> impl IntoView {
-    let state = dashboard_state();
-    let lines = RwSignal::new(VecDeque::<(u64, String)>::new());
-    let seq = StoredValue::new(0u64);
-    let tick = StoredValue::new(0u64);
+    let lines = RwSignal::new(VecDeque::<LogLine>::new());
+    start_log_stream(lines);
 
-    let push = move |text: String| {
-        let s = seq.get_value();
-        seq.set_value(s + 1);
-        lines.update(|l| {
-            l.push_front((s, format!("[{}]  {}", now_hms(), text)));
-            while l.len() > MAX_LINES {
-                l.pop_back();
-            }
-        });
-    };
-
-    Effect::new(move |prev: Option<HashMap<u64, (TorrentState, String)>>| {
-        let snap = state.snapshot.get();
-        let cur: HashMap<u64, (TorrentState, String)> = snap
-            .torrents
-            .iter()
-            .map(|t| (t.id, (t.state, t.name.clone())))
-            .collect();
-
-        if let Some(prev) = &prev {
-            for (id, (st, name)) in &cur {
-                match prev.get(id) {
-                    None => push(format!("ACQUIRED :: {}", trunc(name))),
-                    Some((pst, _)) if pst != st => {
-                        push(format!("{} :: {}", state_label(*st), trunc(name)))
-                    }
-                    _ => {}
-                }
-            }
-            for (id, (_, name)) in prev {
-                if !cur.contains_key(id) {
-                    push(format!("PURGED :: {}", trunc(name)));
-                }
-            }
-        }
-
-        let tk = tick.get_value();
-        tick.set_value(tk + 1);
-        // ~ every 4 seconds at the 4 Hz sample rate
-        if tk % 16 == 8 {
-            push(FLAVOR[rand_index(FLAVOR.len())].to_string());
-        }
-
-        cur
-    });
-
-    let entries = move || lines.get().into_iter().collect::<Vec<(u64, String)>>();
+    // Newest first (push_front on arrival), capped to MAX_LINES.
+    let entries = move || lines.get().into_iter().collect::<Vec<LogLine>>();
 
     view! {
         <div class="logticker panel">
             <div class="lt-head">"// SYSTEM LOG"<span class="lt-blink">"▮"</span></div>
             <div class="lt-body">
-                <For
-                    each=entries
-                    key=|(s, _)| *s
-                    children=move |(_, text)| view! { <div class="lt-line">{text}</div> }
-                />
+                <For each=entries key=|l| l.id let:l>
+                    <div class=format!("lt-line lt-{}", l.level.to_lowercase())>
+                        <span class="lt-time">{l.time.clone()}</span>
+                        <span class="lt-level">{l.level.clone()}</span>
+                        <span class="lt-msg">{l.message.clone()}</span>
+                    </div>
+                </For>
             </div>
         </div>
     }
 }
+
+#[cfg(feature = "hydrate")]
+fn start_log_stream(lines: RwSignal<VecDeque<LogLine>>) {
+    use wasm_bindgen::closure::Closure;
+    use wasm_bindgen::JsCast;
+
+    const MAX_LINES: usize = 100;
+
+    Effect::new(move |_| {
+        let Ok(es) = web_sys::EventSource::new("/api/logs") else {
+            return;
+        };
+        let on_message = Closure::<dyn FnMut(web_sys::MessageEvent)>::new(
+            move |e: web_sys::MessageEvent| {
+                if let Some(text) = e.data().as_string() {
+                    if let Ok(line) = serde_json::from_str::<LogLine>(&text) {
+                        lines.update(|l| {
+                            l.push_front(line);
+                            while l.len() > MAX_LINES {
+                                l.pop_back();
+                            }
+                        });
+                    }
+                }
+            },
+        );
+        es.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
+        on_message.forget();
+        // Close the stream when this component unmounts (e.g. navigating away),
+        // so EventSource connections don't accumulate.
+        let es_close = es.clone();
+        on_cleanup(move || {
+            es_close.close();
+        });
+    });
+}
+
+#[cfg(not(feature = "hydrate"))]
+fn start_log_stream(_lines: RwSignal<VecDeque<LogLine>>) {}

@@ -17,21 +17,29 @@ async fn main() {
     use torrentoxide::app::{shell, App};
     use torrentoxide::server::config::AppConfig;
     use torrentoxide::server::engine::Engine;
+    use torrentoxide::server::logbuf::{LogBuffer, LogLayer};
     use torrentoxide::server::pvr::Pvr;
     use torrentoxide::server::{
         auth,
-        events::sse_handler,
+        events::{logs_handler, sse_handler},
         upload::{probe_handler, upload_handler},
         AppState,
     };
 
     dotenvy::dotenv().ok();
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info,librqbit=info".into()),
-        )
-        .init();
+    // Capture tracing output (app + librqbit) into a ring buffer for the
+    // system-log UI, alongside the usual stdout formatter.
+    let log_buf = LogBuffer::new(100);
+    {
+        use tracing_subscriber::prelude::*;
+        let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+            .unwrap_or_else(|_| "info,librqbit=info".into());
+        tracing_subscriber::registry()
+            .with(filter)
+            .with(tracing_subscriber::fmt::layer())
+            .with(LogLayer::new(log_buf.clone()))
+            .init();
+    }
 
     let config = Arc::new(AppConfig::from_env().expect("failed to load configuration"));
     let engine = Engine::new(config.clone())
@@ -78,12 +86,14 @@ async fn main() {
         config: config.clone(),
         key,
         pvr,
+        log_buf,
     };
 
     let routes = generate_route_list(App);
 
     let app = Router::new()
         .route("/api/events", get(sse_handler))
+        .route("/api/logs", get(logs_handler))
         .route(
             "/api/upload",
             post(upload_handler).layer(DefaultBodyLimit::max(26 * 1024 * 1024)),

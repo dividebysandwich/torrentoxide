@@ -4,6 +4,7 @@ pub mod auth;
 pub mod config;
 pub mod engine;
 pub mod events;
+pub mod logbuf;
 pub mod pvr;
 pub mod upload;
 
@@ -15,6 +16,7 @@ use leptos::prelude::LeptosOptions;
 
 use config::AppConfig;
 use engine::Engine;
+use logbuf::LogBuffer;
 use pvr::Pvr;
 
 /// Shared application state provided to Axum handlers and Leptos server fns.
@@ -25,6 +27,7 @@ pub struct AppState {
     pub config: Arc<AppConfig>,
     pub key: Key,
     pub pvr: Arc<Pvr>,
+    pub log_buf: Arc<LogBuffer>,
 }
 
 impl FromRef<AppState> for LeptosOptions {
