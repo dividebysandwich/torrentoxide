@@ -17,6 +17,9 @@ pub struct AppConfig {
     pub auth_password: Option<String>,
     /// Secret used to sign the session cookie. Random (per-run) if unset.
     pub session_secret: Option<String>,
+    /// TMDb API key for metadata lookups (library / wanted / episode monitor).
+    /// Overridable in the web UI; used by the PVR features.
+    pub tmdb_api_key: Option<String>,
 }
 
 /// Read a non-empty env var, trimming whitespace; `None` if unset or blank.
@@ -60,6 +63,7 @@ impl AppConfig {
             auth_username,
             auth_password,
             session_secret: env_opt("SESSION_SECRET"),
+            tmdb_api_key: env_opt("TMDB_API_KEY"),
         })
     }
 
