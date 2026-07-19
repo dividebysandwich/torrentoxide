@@ -22,15 +22,17 @@ fn flash(sig: RwSignal<bool>, ms: u64) {
 enum StatusFilter {
     All,
     Downloading,
+    Queued,
     Seeding,
     Paused,
     Error,
 }
 
 impl StatusFilter {
-    const ALL: [StatusFilter; 5] = [
+    const ALL: [StatusFilter; 6] = [
         Self::All,
         Self::Downloading,
+        Self::Queued,
         Self::Seeding,
         Self::Paused,
         Self::Error,
@@ -40,6 +42,7 @@ impl StatusFilter {
         match self {
             Self::All => true,
             Self::Downloading => matches!(s, TorrentState::Live | TorrentState::Initializing),
+            Self::Queued => matches!(s, TorrentState::Queued),
             Self::Seeding => matches!(s, TorrentState::Finished),
             Self::Paused => matches!(s, TorrentState::Paused),
             Self::Error => matches!(s, TorrentState::Error),
@@ -50,6 +53,7 @@ impl StatusFilter {
         match self {
             Self::All => "ALL",
             Self::Downloading => "DOWNLOADING",
+            Self::Queued => "QUEUED",
             Self::Seeding => "SEEDING",
             Self::Paused => "PAUSED",
             Self::Error => "ERROR",
@@ -400,7 +404,9 @@ fn TorrentRow(id: u64) -> impl IntoView {
     let eta_text = move || fmt_eta(torrent.get().and_then(|t| t.eta_secs));
     let error_text = move || torrent.get().and_then(|t| t.error);
 
-    let is_paused = move || matches!(st(), TorrentState::Paused);
+    // Queued torrents are held paused; the start button force-starts them
+    // (the queue re-balances to keep the active limit).
+    let is_paused = move || matches!(st(), TorrentState::Paused | TorrentState::Queued);
 
     // One-shot effects: "materialize" glitch on first appearance, RGB-glitch on
     // error, and a completion burst when the torrent finishes.

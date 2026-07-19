@@ -1182,6 +1182,10 @@ code {
   &.badge-initializing {
     color: var(--yellow);
   }
+  &.badge-queued {
+    color: var(--yellow);
+    opacity: 0.85;
+  }
   &.badge-paused {
     color: var(--ink-dim);
   }

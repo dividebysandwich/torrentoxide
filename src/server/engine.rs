@@ -15,7 +15,7 @@ use librqbit::{
     AddTorrent, AddTorrentOptions, Api, Session, SessionOptions, SessionPersistenceConfig,
     TorrentStatsState,
 };
-use tokio::sync::watch;
+use tokio::sync::{broadcast, watch};
 
 use crate::server::config::AppConfig;
 use crate::types::{
@@ -69,6 +69,16 @@ enum PendingStatus {
     Failed(String),
 }
 
+/// Emitted when a background add (magnet/URL metadata fetch) fails, so the PVR
+/// can drop the dead grab and try another release for the same episode/movie.
+#[derive(Clone, Debug)]
+pub struct AddFailure {
+    /// The magnet link / URL that failed (matches what the PVR grabbed).
+    pub source: String,
+    pub output_dir: String,
+    pub error: String,
+}
+
 /// An add that is still being processed in the background (e.g. a magnet whose
 /// metadata is being fetched from peers). Surfaced to the UI as a placeholder row.
 struct PendingAdd {
@@ -92,10 +102,15 @@ pub struct Engine {
     /// Torrents auto-paused for reaching their seeding ratio — tracked so we
     /// pause them exactly once and don't fight a manual resume.
     ratio_paused: Mutex<HashSet<usize>>,
+    /// Torrents held paused by the download queue (max-active-downloads). These
+    /// are surfaced as `Queued` and auto-resumed when a slot frees.
+    queued: Mutex<HashSet<usize>>,
     /// Cached (free, total) bytes on the download filesystem, refreshed at 1 Hz.
     disk: Mutex<(u64, u64)>,
     /// Latest snapshot (with embedded history); updated by the sampler, relayed by SSE.
     tx: watch::Sender<Arc<StatsSnapshot>>,
+    /// Notifies subscribers (the PVR) when a background add fails.
+    add_failed_tx: broadcast::Sender<AddFailure>,
 }
 
 impl Engine {
@@ -126,6 +141,7 @@ impl Engine {
         history.global = vec![(0.0, 0.0); GLOBAL_HIST_LEN].into();
 
         let (tx, _rx) = watch::channel(Arc::new(StatsSnapshot::default()));
+        let (add_failed_tx, _) = broadcast::channel(64);
         let engine = Arc::new(Self {
             api,
             config,
@@ -135,8 +151,10 @@ impl Engine {
             settings: Mutex::new(settings),
             settings_path,
             ratio_paused: Mutex::new(HashSet::new()),
+            queued: Mutex::new(HashSet::new()),
             disk: Mutex::new(read_disk(&disk_dir)),
             tx,
+            add_failed_tx,
         });
 
         // Sample + broadcast 4×/second (independent of any connected client);
@@ -147,14 +165,31 @@ impl Engine {
             let mut tick: u64 = 0;
             loop {
                 interval.tick().await;
-                let snapshot =
-                    sampler.sample_and_record(tick % HISTORY_EVERY == 0, tick / HISTORY_EVERY);
+                let record = tick % HISTORY_EVERY == 0;
+                let snapshot = sampler.sample_and_record(record, tick / HISTORY_EVERY);
                 // Auto-pause any torrent that has reached its seeding ratio goal.
                 for id in sampler.ratio_targets(&snapshot) {
                     let e = sampler.clone();
                     tokio::spawn(async move {
                         let _ = e.pause(id).await;
                     });
+                }
+                // Enforce the download queue at ~1 Hz (states settle between ticks,
+                // avoiding pause/resume churn): pause excess, promote waiting ones.
+                if record {
+                    let (to_pause, to_resume) = sampler.reconcile_queue(&snapshot);
+                    for id in to_pause {
+                        let e = sampler.clone();
+                        tokio::spawn(async move {
+                            let _ = e.pause(id).await;
+                        });
+                    }
+                    for id in to_resume {
+                        let e = sampler.clone();
+                        tokio::spawn(async move {
+                            let _ = e.resume(id).await;
+                        });
+                    }
                 }
                 // `send_replace` always stores the value (even with zero subscribers),
                 // so a client connecting later immediately gets the full history.
@@ -234,6 +269,71 @@ impl Engine {
             }
         }
         targets
+    }
+
+    /// Enforce the max-active-downloads limit. Returns `(to_pause, to_resume)`:
+    /// torrents to hold in the queue (over the limit) and queued torrents to
+    /// start now (a slot opened). Updates the queued set to match.
+    fn reconcile_queue(&self, snapshot: &StatsSnapshot) -> (Vec<u64>, Vec<u64>) {
+        let limit = self.settings.lock().unwrap().max_active_downloads as usize;
+        let mut queued = self.queued.lock().unwrap();
+
+        // A queued torrent shows up as `Queued` (paused overlay). Keep only ids
+        // we're genuinely still holding; drop any that vanished, finished,
+        // errored, or were manually resumed.
+        let held: HashSet<usize> = snapshot
+            .torrents
+            .iter()
+            .filter(|t| !t.pending && matches!(t.state, TorrentState::Queued | TorrentState::Paused))
+            .map(|t| t.id as usize)
+            .collect();
+        queued.retain(|id| held.contains(id));
+
+        // Unlimited → release anything we were holding.
+        if limit == 0 {
+            let to_resume: Vec<u64> = queued.iter().map(|id| *id as u64).collect();
+            queued.clear();
+            return (Vec::new(), to_resume);
+        }
+
+        // Torrents actively occupying a download slot (queued ones are excluded,
+        // since they read as Queued/Paused).
+        let mut active: Vec<u64> = snapshot
+            .torrents
+            .iter()
+            .filter(|t| !t.pending && matches!(t.state, TorrentState::Live | TorrentState::Initializing))
+            .map(|t| t.id)
+            .collect();
+
+        if active.len() > limit {
+            // Over the limit: queue the most recently added (highest id) extras.
+            active.sort_unstable();
+            let excess = active.len() - limit;
+            let to_pause: Vec<u64> = active.into_iter().rev().take(excess).collect();
+            for id in &to_pause {
+                queued.insert(*id as usize);
+            }
+            (to_pause, Vec::new())
+        } else {
+            let slots = limit - active.len();
+            if slots == 0 || queued.is_empty() {
+                return (Vec::new(), Vec::new());
+            }
+            // Promote the oldest waiting torrents (lowest id first) into free slots.
+            let mut waiting: Vec<u64> = queued.iter().map(|id| *id as u64).collect();
+            waiting.sort_unstable();
+            let to_resume: Vec<u64> = waiting.into_iter().take(slots).collect();
+            for id in &to_resume {
+                queued.remove(&(*id as usize));
+            }
+            (Vec::new(), to_resume)
+        }
+    }
+
+    /// Subscribe to background-add failure notifications (used by the PVR to
+    /// recover a stalled auto-download by grabbing an alternative release).
+    pub fn subscribe_add_failures(&self) -> broadcast::Receiver<AddFailure> {
+        self.add_failed_tx.subscribe()
     }
 
     /// Change which files a running torrent downloads (per-file selection).
@@ -368,7 +468,7 @@ impl Engine {
         let engine = self.clone();
         tokio::spawn(async move {
             let opts = AddTorrentOptions {
-                output_folder: Some(dir),
+                output_folder: Some(dir.clone()),
                 paused,
                 overwrite: true,
                 only_files,
@@ -376,7 +476,7 @@ impl Engine {
             };
             let outcome = match tokio::time::timeout(
                 RESOLVE_TIMEOUT,
-                engine.api.api_add_torrent(AddTorrent::from_url(source), Some(opts)),
+                engine.api.api_add_torrent(AddTorrent::from_url(source.clone()), Some(opts)),
             )
             .await
             {
@@ -384,6 +484,15 @@ impl Engine {
                 Ok(Err(e)) => Err(e.to_string()),
                 Ok(Ok(_)) => Ok(()),
             };
+            // Notify subscribers (the PVR) so a stalled auto-download can be
+            // retried with a different release for the same episode/movie.
+            if let Err(ref e) = outcome {
+                let _ = engine.add_failed_tx.send(AddFailure {
+                    source: source.clone(),
+                    output_dir: dir.clone(),
+                    error: e.clone(),
+                });
+            }
             engine.finish_pending(id, outcome);
         });
         Ok(())
@@ -537,6 +646,9 @@ impl Engine {
             .api
             .api_torrent_list_ext(ApiTorrentListOpts { with_stats: true });
 
+        // Snapshot the queue set so paused-because-queued torrents read as `Queued`.
+        let queued = self.queued.lock().unwrap().clone();
+
         // id (usize) kept alongside each view so we can key its history.
         let mut reals: Vec<(usize, TorrentView)> = Vec::with_capacity(list.torrents.len());
         let mut global_down = 0.0f64;
@@ -568,6 +680,13 @@ impl Engine {
                 _ if stats.finished => TorrentState::Finished,
                 TorrentStatsState::Initializing => TorrentState::Initializing,
                 TorrentStatsState::Live => TorrentState::Live,
+            };
+            // A torrent paused because it's waiting for a download slot is shown
+            // as Queued (distinct from a user pause).
+            let state = if matches!(state, TorrentState::Paused) && queued.contains(&id) {
+                TorrentState::Queued
+            } else {
+                state
             };
 
             let eta_secs = if down_bps > 1.0 && !stats.finished && stats.total_bytes >= stats.progress_bytes {

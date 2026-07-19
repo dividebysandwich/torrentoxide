@@ -5,11 +5,14 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::api::{
-    delete_category, delete_quality_profile, get_provider_info, list_categories,
-    list_quality_profiles, set_tmdb_key, test_tmdb, upsert_category, upsert_quality_profile,
+    delete_category, delete_quality_profile, get_provider_info, get_settings, list_categories,
+    list_quality_profiles, set_settings, set_tmdb_key, test_tmdb, upsert_category,
+    upsert_quality_profile,
 };
 use crate::components::dashboard_state;
-use crate::types::{Category, HdrPref, MediaKind, ProviderInfo, QualityProfile, Resolution};
+use crate::types::{
+    Category, HdrPref, MediaKind, ProviderInfo, QualityProfile, Resolution, Settings,
+};
 
 const KINDS: [MediaKind; 3] = [MediaKind::Movie, MediaKind::Tv, MediaKind::Other];
 
@@ -33,10 +36,74 @@ fn hdr_index(h: HdrPref) -> usize {
 pub fn SettingsPage() -> impl IntoView {
     view! {
         <div class="settings-page">
+            <QueueSection/>
             <ProvidersSection/>
             <CategoriesSection/>
             <QualityProfilesSection/>
         </div>
+    }
+}
+
+#[component]
+fn QueueSection() -> impl IntoView {
+    // Load the full settings so a save preserves rate limits / seeding goals.
+    let settings = RwSignal::new(Settings::default());
+    let loaded = RwSignal::new(false);
+    let status = RwSignal::new(String::new());
+
+    Effect::new(move |_| {
+        spawn_local(async move {
+            if let Ok(s) = get_settings().await {
+                settings.set(s);
+                loaded.set(true);
+            }
+        });
+    });
+
+    // Empty / invalid parses to 0 (unlimited — no queue).
+    let on_max = move |e| {
+        let v = event_target_value(&e).trim().parse::<u32>().unwrap_or(0);
+        settings.update(|s| s.max_active_downloads = v);
+        let s = settings.get();
+        spawn_local(async move {
+            match set_settings(s).await {
+                Ok(()) => status.set("Saved.".into()),
+                Err(e) => status.set(e.to_string()),
+            }
+        });
+    };
+    let max_val = move || match settings.get().max_active_downloads {
+        0 => String::new(),
+        v => v.to_string(),
+    };
+
+    view! {
+        <section class="panel settings-section">
+            <h2 class="page-title">"DOWNLOAD QUEUE"</h2>
+            <p class="settings-hint">
+                "Limit how many torrents download at once. Extras wait in a "
+                <b>"QUEUED"</b>
+                " state and start automatically as slots free up. Leave blank (0) for unlimited."
+            </p>
+            <div class="cat-form">
+                <label class="qp-field">
+                    <span>"MAX ACTIVE"</span>
+                    <input
+                        class="text-input"
+                        r#type="number"
+                        min="0"
+                        placeholder="∞"
+                        prop:value=max_val
+                        prop:disabled=move || !loaded.get()
+                        on:change=on_max
+                    />
+                </label>
+                <span class="settings-hint">
+                    {move || if loaded.get() { "0 = unlimited" } else { "loading…" }}
+                </span>
+            </div>
+            <p class="add-status">{move || status.get()}</p>
+        </section>
     }
 }
 

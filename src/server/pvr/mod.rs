@@ -11,8 +11,9 @@ pub mod scan;
 pub mod store;
 pub mod xmlparse;
 
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Result};
@@ -35,8 +36,34 @@ const SCAN_INTERVAL: Duration = Duration::from_secs(3600);
 /// How often finished TV downloads are imported into Show/Season folders.
 const IMPORT_INTERVAL: Duration = Duration::from_secs(300);
 const IMPORT_MODE_KEY: &str = "import_mode";
+/// Forget in-flight grab tracking after this long — a grab resolves (success or
+/// the broadcast failure) well within the engine's resolve timeout.
+const GRAB_TRACK_TTL: u64 = 900;
 
 const VIDEO_EXTS: [&str; 9] = ["mkv", "mp4", "avi", "m4v", "mov", "ts", "webm", "mpg", "wmv"];
+
+/// Recovery context for an in-flight PVR grab, keyed by its release URL. If the
+/// download fails (metadata fetch), this drives a re-search for an alternative
+/// release of the same episode/movie so automation doesn't stall.
+#[derive(Clone)]
+struct GrabContext {
+    /// Grab-history dedup key (episode/movie key for the monitor, URL otherwise).
+    dedup_id: String,
+    /// Canonical title to match/search alternatives against.
+    title: String,
+    season: Option<i32>,
+    episode: Option<i32>,
+    year: Option<i32>,
+    category: String,
+    /// Quality profile id (empty = none / seeders-ranked).
+    profile_id: String,
+    /// Grab source label recorded in history ("monitor", a feed name, "search").
+    source: String,
+    /// Release URLs already attempted for this target (never retried).
+    tried: HashSet<String>,
+    /// When registered (unix secs); used to prune long-resolved grabs.
+    at: u64,
+}
 
 /// How a finished download is placed into the organized library.
 #[derive(Clone, Copy, PartialEq)]
@@ -166,6 +193,8 @@ pub struct Pvr {
     config: Arc<AppConfig>,
     meta: MetadataClient,
     http: reqwest::Client,
+    /// In-flight grabs (release URL → recovery context) for failure recovery.
+    grabs: Mutex<HashMap<String, GrabContext>>,
 }
 
 impl Pvr {
@@ -178,6 +207,7 @@ impl Pvr {
             config,
             meta: MetadataClient::new(),
             http: reqwest::Client::new(),
+            grabs: Mutex::new(HashMap::new()),
         });
 
         // Poll auto-download RSS feeds on a fixed interval (first tick fires soon
@@ -229,6 +259,20 @@ impl Pvr {
             loop {
                 interval.tick().await;
                 importer.import_and_reap().await;
+            }
+        });
+
+        // Recover stalled auto-downloads: when a grab's metadata fetch fails,
+        // drop the dead release and grab an alternative for the same target.
+        let recovery = pvr.clone();
+        tokio::spawn(async move {
+            let mut rx = recovery.engine.subscribe_add_failures();
+            loop {
+                match rx.recv().await {
+                    Ok(f) => recovery.handle_add_failure(&f.source, &f.error).await,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
             }
         });
 
@@ -493,7 +537,7 @@ impl Pvr {
                 None => w.title.clone(),
             },
         };
-        let releases = self.search_releases(&query).await.unwrap_or_default();
+        let releases = self.filter_blacklisted(self.search_releases(&query).await.unwrap_or_default());
         let Some((rel, sc)) = best_acceptable(&releases, profile, &w.title, season, episode) else {
             return false;
         };
@@ -506,10 +550,22 @@ impl Pvr {
                     && sc > c
             }
         };
-        should
-            && self
-                .grab_release(dedup_id, &rel.url, &rel.title, &w.category, "monitor", sc)
-                .is_ok()
+        if !should {
+            return false;
+        }
+        let ctx = GrabContext {
+            dedup_id: dedup_id.to_string(),
+            title: w.title.clone(),
+            season,
+            episode,
+            year: w.year,
+            category: w.category.clone(),
+            profile_id: w.quality_profile.clone(),
+            source: "monitor".to_string(),
+            tried: HashSet::new(),
+            at: 0,
+        };
+        self.grab_release_ctx(ctx, &rel.url, &rel.title, sc).is_ok()
     }
 
     // --- categories --------------------------------------------------------
@@ -708,6 +764,7 @@ impl Pvr {
 
     /// Start a download and record it in grab history under dedup key `id`
     /// (release URL for feeds/search; an episode/movie key for the monitor).
+    /// Registers a basic recovery context derived from the release title.
     pub fn grab_release(
         &self,
         id: &str,
@@ -717,17 +774,101 @@ impl Pvr {
         source: &str,
         score: i64,
     ) -> Result<()> {
-        let path = self.category_path(category);
+        let parsed = quality::parse_release(title);
+        let se = scan::extract_se(title);
+        let ctx = GrabContext {
+            dedup_id: id.to_string(),
+            title: parsed.title.clone(),
+            season: parsed.season.or(se.0),
+            episode: parsed.episode.or(se.1),
+            year: parsed.year,
+            category: category.to_string(),
+            profile_id: String::new(),
+            source: source.to_string(),
+            tried: HashSet::new(),
+            at: 0,
+        };
+        self.grab_release_ctx(ctx, url, title, score)
+    }
+
+    /// Start a download, record it in history, and register recovery tracking so
+    /// a failed metadata fetch retries with a different release (keyed by URL).
+    fn grab_release_ctx(
+        &self,
+        mut ctx: GrabContext,
+        url: &str,
+        title: &str,
+        score: i64,
+    ) -> Result<()> {
+        let path = self.category_path(&ctx.category);
         self.engine.spawn_add_url(url.to_string(), path, false, None)?;
         self.store.record_grab(&GrabHistoryEntry {
-            id: id.to_string(),
+            id: ctx.dedup_id.clone(),
             title: title.to_string(),
             url: url.to_string(),
-            category: category.to_string(),
-            source: source.to_string(),
+            category: ctx.category.clone(),
+            source: ctx.source.clone(),
             score,
             grabbed_at: now_secs(),
-        })
+        })?;
+        ctx.tried.insert(url.to_string());
+        ctx.at = now_secs();
+        let mut grabs = self.grabs.lock().unwrap();
+        // Prune grabs that have long since resolved (a success leaves no signal).
+        let cutoff = now_secs().saturating_sub(GRAB_TRACK_TTL);
+        grabs.retain(|_, c| c.at >= cutoff);
+        grabs.insert(url.to_string(), ctx);
+        Ok(())
+    }
+
+    /// Drop releases whose URL is on the failed-download blacklist.
+    fn filter_blacklisted(&self, releases: Vec<Release>) -> Vec<Release> {
+        let bl = self.store.blacklisted_urls().unwrap_or_default();
+        releases.into_iter().filter(|r| !bl.contains(&r.url)).collect()
+    }
+
+    /// A background add failed. If it was one of our grabs, blacklist the dead
+    /// URL, clear the stale history entry, and grab an alternative release.
+    async fn handle_add_failure(&self, url: &str, error: &str) {
+        let ctx = self.grabs.lock().unwrap().remove(url);
+        let Some(ctx) = ctx else { return }; // not a PVR grab (e.g. a manual UI add)
+        tracing::warn!("grab failed for \"{}\" ({error}); searching for an alternative", ctx.title);
+        let _ = self.store.blacklist_url(url);
+        // Drop the failed grab from history so this target can be re-attempted.
+        let _ = self.store.remove_grab(&ctx.dedup_id);
+        self.retry_grab(ctx).await;
+    }
+
+    /// Search for and grab the best alternative release for a failed grab's
+    /// target, skipping anything already tried or blacklisted.
+    async fn retry_grab(&self, ctx: GrabContext) {
+        let query = match (ctx.season, ctx.episode) {
+            (Some(s), Some(e)) => format!("{} S{s:02}E{e:02}", ctx.title),
+            _ => match ctx.year {
+                Some(y) => format!("{} {y}", ctx.title),
+                None => ctx.title.clone(),
+            },
+        };
+        let releases = self.search_releases(&query).await.unwrap_or_default();
+        let blacklist = self.store.blacklisted_urls().unwrap_or_default();
+        let candidates: Vec<Release> = releases
+            .into_iter()
+            .filter(|r| !ctx.tried.contains(&r.url) && !blacklist.contains(&r.url))
+            .collect();
+        let profiles = self.store.list_quality_profiles().unwrap_or_default();
+        let profile = profiles.iter().find(|p| p.id == ctx.profile_id);
+        match best_acceptable(&candidates, profile, &ctx.title, ctx.season, ctx.episode) {
+            Some((rel, sc)) => {
+                let dedup = ctx.dedup_id.clone();
+                let title = rel.title.clone();
+                // Carry the tried set forward so repeated failures keep advancing.
+                match self.grab_release_ctx(ctx, &rel.url, &rel.title, sc) {
+                    Ok(()) => tracing::info!("retrying {dedup} with alternative release: {title}"),
+                    Err(e) => tracing::warn!("retry grab failed: {e}"),
+                }
+            }
+            None => tracing::warn!("no alternative release found for \"{}\"", ctx.title),
+        }
     }
 
     pub fn list_grab_history(&self) -> Result<Vec<GrabHistoryEntry>> {
@@ -755,6 +896,10 @@ impl Pvr {
                 if self.store.history_contains(&item.url).unwrap_or(false) {
                     continue;
                 }
+                // Never re-grab a release we've already blacklisted as dead.
+                if self.store.is_blacklisted(&item.url).unwrap_or(false) {
+                    continue;
+                }
                 // Skip episodes already present on disk (best-effort match).
                 let parsed = quality::parse_release(&item.title);
                 let (season, episode) = if parsed.episode.is_some() {
@@ -775,7 +920,19 @@ impl Pvr {
                     },
                     None => 0,
                 };
-                match self.grab_release(&item.url, &item.url, &item.title, &f.category, &f.name, sc) {
+                let ctx = GrabContext {
+                    dedup_id: item.url.clone(),
+                    title: parsed.title.clone(),
+                    season,
+                    episode,
+                    year: parsed.year,
+                    category: f.category.clone(),
+                    profile_id: f.quality_profile.clone(),
+                    source: f.name.clone(),
+                    tried: HashSet::new(),
+                    at: 0,
+                };
+                match self.grab_release_ctx(ctx, &item.url, &item.title, sc) {
                     Ok(()) => grabbed += 1,
                     Err(e) => tracing::warn!("grab failed: {e}"),
                 }

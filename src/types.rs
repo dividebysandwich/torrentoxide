@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 pub enum TorrentState {
     Initializing,
     Live,
+    /// Waiting for a free download slot (max-active-downloads queue). Held paused
+    /// by the engine; started automatically when a slot opens.
+    Queued,
     Paused,
     Finished,
     Error,
@@ -18,6 +21,7 @@ impl TorrentState {
         match self {
             TorrentState::Initializing => "initializing",
             TorrentState::Live => "downloading",
+            TorrentState::Queued => "queued",
             TorrentState::Paused => "paused",
             TorrentState::Finished => "finished",
             TorrentState::Error => "error",
@@ -430,6 +434,10 @@ pub struct Settings {
     /// Seeding ratio (uploaded / downloaded) at which to stop seeding.
     #[serde(default = "default_ratio")]
     pub ratio_limit: f32,
+    /// Maximum torrents downloading at once; extras wait in the `Queued` state
+    /// and start automatically as slots free. `0` = unlimited (no queue).
+    #[serde(default)]
+    pub max_active_downloads: u32,
 }
 
 fn default_ratio() -> f32 {
@@ -443,6 +451,7 @@ impl Default for Settings {
             up_limit_kbps: 0,
             ratio_enabled: false,
             ratio_limit: default_ratio(),
+            max_active_downloads: 0,
         }
     }
 }

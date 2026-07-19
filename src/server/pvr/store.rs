@@ -17,6 +17,8 @@ const CONFIG: TableDefinition<&str, &[u8]> = TableDefinition::new("config");
 const INDEXERS: TableDefinition<&str, &[u8]> = TableDefinition::new("indexers");
 const FEEDS: TableDefinition<&str, &[u8]> = TableDefinition::new("feeds");
 const GRAB_HISTORY: TableDefinition<&str, &[u8]> = TableDefinition::new("grab_history");
+/// Release URLs that failed to download; never re-grabbed (recovery avoids them).
+const GRAB_BLACKLIST: TableDefinition<&str, &[u8]> = TableDefinition::new("grab_blacklist");
 const LIBRARY: TableDefinition<&str, &[u8]> = TableDefinition::new("library");
 const WANTED: TableDefinition<&str, &[u8]> = TableDefinition::new("wanted");
 const IMPORTED: TableDefinition<&str, &[u8]> = TableDefinition::new("imported");
@@ -39,6 +41,7 @@ impl PvrStore {
             let _ = txn.open_table(INDEXERS)?;
             let _ = txn.open_table(FEEDS)?;
             let _ = txn.open_table(GRAB_HISTORY)?;
+            let _ = txn.open_table(GRAB_BLACKLIST)?;
             let _ = txn.open_table(LIBRARY)?;
             let _ = txn.open_table(WANTED)?;
             let _ = txn.open_table(IMPORTED)?;
@@ -243,6 +246,46 @@ impl PvrStore {
             }
         }
         out.sort_by(|a, b| b.grabbed_at.cmp(&a.grabbed_at));
+        Ok(out)
+    }
+
+    /// Remove a grab-history entry (used when a grab failed and is re-attempted).
+    pub fn remove_grab(&self, id: &str) -> Result<()> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(GRAB_HISTORY)?;
+            table.remove(id)?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    // --- grab blacklist (dead release URLs) --------------------------------
+
+    pub fn blacklist_url(&self, url: &str) -> Result<()> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(GRAB_BLACKLIST)?;
+            table.insert(url, [1u8].as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    pub fn is_blacklisted(&self, url: &str) -> Result<bool> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(GRAB_BLACKLIST)?;
+        Ok(table.get(url)?.is_some())
+    }
+
+    pub fn blacklisted_urls(&self) -> Result<std::collections::HashSet<String>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(GRAB_BLACKLIST)?;
+        let mut out = std::collections::HashSet::new();
+        for entry in table.iter()? {
+            let (k, _v) = entry?;
+            out.insert(k.value().to_string());
+        }
         Ok(out)
     }
 
