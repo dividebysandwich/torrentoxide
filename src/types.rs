@@ -228,6 +228,72 @@ pub struct MediaSearchResult {
     pub is_tv: bool,
 }
 
+/// Normalize a media title for fuzzy comparison: lowercase, alphanumerics and
+/// single spaces only. Shared by the scanner, monitor and matcher.
+pub fn norm_title(s: &str) -> String {
+    let cleaned: String = s
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' })
+        .collect();
+    cleaned.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A downloaded movie found by the library scan.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LibraryMovie {
+    pub title: String,
+    pub year: Option<i32>,
+    pub resolution: String,
+    pub size: u64,
+    pub path: String,
+}
+
+/// One downloaded episode of a show.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LibraryEpisode {
+    pub season: i32,
+    pub episode: i32,
+    pub resolution: String,
+    pub path: String,
+}
+
+/// A show with its downloaded episodes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LibraryShow {
+    pub title: String,
+    pub episodes: Vec<LibraryEpisode>,
+}
+
+/// The scanned media library (filename-based).
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+pub struct Library {
+    pub movies: Vec<LibraryMovie>,
+    pub shows: Vec<LibraryShow>,
+    pub file_count: usize,
+    /// Unix seconds of the last scan (0 = never).
+    pub scanned_at: u64,
+}
+
+impl Library {
+    /// Is a movie with this (normalized) title already on disk?
+    pub fn has_movie(&self, title: &str, year: Option<i32>) -> bool {
+        let nt = norm_title(title);
+        self.movies.iter().any(|m| {
+            norm_title(&m.title) == nt
+                && (year.is_none() || m.year.is_none() || m.year == year)
+        })
+    }
+
+    /// Is this episode of this (normalized) show already on disk?
+    pub fn has_episode(&self, title: &str, season: i32, episode: i32) -> bool {
+        let nt = norm_title(title);
+        self.shows.iter().any(|s| {
+            norm_title(&s.title) == nt
+                && s.episodes.iter().any(|e| e.season == season && e.episode == episode)
+        })
+    }
+}
+
 /// A configured Torznab indexer (e.g. a Jackett indexer endpoint).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Indexer {

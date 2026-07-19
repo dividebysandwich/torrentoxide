@@ -4,7 +4,7 @@
 use leptos::prelude::*;
 
 use crate::types::{
-    AddRequest, Category, Defaults, DirListing, FileEntry, GrabHistoryEntry, Indexer,
+    AddRequest, Category, Defaults, DirListing, FileEntry, GrabHistoryEntry, Indexer, Library,
     MediaSearchResult, ProviderInfo, QualityProfile, Release, RssFeed, Settings, TorrentDetail,
     TorrentView,
 };
@@ -342,6 +342,25 @@ pub async fn poll_feeds_now() -> Result<usize, ServerFnError> {
     state
         .pvr
         .poll_feeds()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+// --- library ----------------------------------------------------------------
+
+#[server]
+pub async fn get_library() -> Result<Library, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    Ok(state.pvr.library())
+}
+
+#[server]
+pub async fn rescan_library() -> Result<Library, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    let pvr = state.pvr.clone();
+    tokio::task::spawn_blocking(move || pvr.scan_library())
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))
 }

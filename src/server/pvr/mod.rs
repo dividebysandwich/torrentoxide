@@ -7,6 +7,7 @@ pub mod feed;
 pub mod indexer;
 pub mod meta;
 pub mod quality;
+pub mod scan;
 pub mod store;
 pub mod xmlparse;
 
@@ -19,8 +20,8 @@ use anyhow::{bail, Result};
 use crate::server::config::AppConfig;
 use crate::server::engine::Engine;
 use crate::types::{
-    Category, GrabHistoryEntry, Indexer, MediaSearchResult, ProviderInfo, QualityProfile, Release,
-    RssFeed,
+    Category, GrabHistoryEntry, Indexer, Library, MediaSearchResult, ProviderInfo, QualityProfile,
+    Release, RssFeed,
 };
 use meta::MetadataClient;
 use store::PvrStore;
@@ -28,6 +29,8 @@ use store::PvrStore;
 const TMDB_KEY: &str = "tmdb_api_key";
 /// How often enabled auto-download RSS feeds are polled.
 const FEED_POLL_INTERVAL: Duration = Duration::from_secs(900);
+/// How often the download tree is re-scanned into the library.
+const SCAN_INTERVAL: Duration = Duration::from_secs(3600);
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -69,7 +72,32 @@ impl Pvr {
             }
         });
 
+        // Re-scan the download tree into the library on a fixed interval
+        // (blocking walk runs on a blocking thread).
+        let scanner = pvr.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(SCAN_INTERVAL);
+            loop {
+                interval.tick().await;
+                let s = scanner.clone();
+                let _ = tokio::task::spawn_blocking(move || s.scan_library()).await;
+            }
+        });
+
         Ok(pvr)
+    }
+
+    // --- library -----------------------------------------------------------
+
+    /// Walk the download tree, rebuild the library snapshot and persist it.
+    pub fn scan_library(&self) -> Library {
+        let lib = scan::scan(&self.config.download_dir, now_secs());
+        let _ = self.store.set_library(&lib);
+        lib
+    }
+
+    pub fn library(&self) -> Library {
+        self.store.get_library().unwrap_or_default()
     }
 
     // --- categories --------------------------------------------------------

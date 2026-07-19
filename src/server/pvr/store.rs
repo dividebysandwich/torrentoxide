@@ -7,7 +7,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use redb::{Database, ReadableTable, TableDefinition};
 
-use crate::types::{Category, GrabHistoryEntry, Indexer, QualityProfile, RssFeed};
+use crate::types::{Category, GrabHistoryEntry, Indexer, Library, QualityProfile, RssFeed};
 
 const CATEGORIES: TableDefinition<&str, &[u8]> = TableDefinition::new("categories");
 const QUALITY_PROFILES: TableDefinition<&str, &[u8]> = TableDefinition::new("quality_profiles");
@@ -15,6 +15,7 @@ const CONFIG: TableDefinition<&str, &[u8]> = TableDefinition::new("config");
 const INDEXERS: TableDefinition<&str, &[u8]> = TableDefinition::new("indexers");
 const FEEDS: TableDefinition<&str, &[u8]> = TableDefinition::new("feeds");
 const GRAB_HISTORY: TableDefinition<&str, &[u8]> = TableDefinition::new("grab_history");
+const LIBRARY: TableDefinition<&str, &[u8]> = TableDefinition::new("library");
 
 pub struct PvrStore {
     db: Database,
@@ -34,6 +35,7 @@ impl PvrStore {
             let _ = txn.open_table(INDEXERS)?;
             let _ = txn.open_table(FEEDS)?;
             let _ = txn.open_table(GRAB_HISTORY)?;
+            let _ = txn.open_table(LIBRARY)?;
         }
         txn.commit()?;
         Ok(Self { db })
@@ -236,5 +238,37 @@ impl PvrStore {
         }
         out.sort_by(|a, b| b.grabbed_at.cmp(&a.grabbed_at));
         Ok(out)
+    }
+
+    /// Best (highest) score previously grabbed under a dedup id, if any.
+    pub fn history_best_score(&self, id: &str) -> Result<Option<i64>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(GRAB_HISTORY)?;
+        Ok(table
+            .get(id)?
+            .and_then(|v| serde_json::from_slice::<GrabHistoryEntry>(v.value()).ok())
+            .map(|e| e.score))
+    }
+
+    // --- library snapshot --------------------------------------------------
+
+    pub fn get_library(&self) -> Result<Library> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(LIBRARY)?;
+        Ok(table
+            .get("current")?
+            .and_then(|v| serde_json::from_slice::<Library>(v.value()).ok())
+            .unwrap_or_default())
+    }
+
+    pub fn set_library(&self, lib: &Library) -> Result<()> {
+        let bytes = serde_json::to_vec(lib)?;
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(LIBRARY)?;
+            table.insert("current", bytes.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
     }
 }
