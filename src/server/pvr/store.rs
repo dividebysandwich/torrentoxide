@@ -19,6 +19,7 @@ const FEEDS: TableDefinition<&str, &[u8]> = TableDefinition::new("feeds");
 const GRAB_HISTORY: TableDefinition<&str, &[u8]> = TableDefinition::new("grab_history");
 const LIBRARY: TableDefinition<&str, &[u8]> = TableDefinition::new("library");
 const WANTED: TableDefinition<&str, &[u8]> = TableDefinition::new("wanted");
+const IMPORTED: TableDefinition<&str, &[u8]> = TableDefinition::new("imported");
 
 pub struct PvrStore {
     db: Database,
@@ -40,6 +41,7 @@ impl PvrStore {
             let _ = txn.open_table(GRAB_HISTORY)?;
             let _ = txn.open_table(LIBRARY)?;
             let _ = txn.open_table(WANTED)?;
+            let _ = txn.open_table(IMPORTED)?;
         }
         txn.commit()?;
         Ok(Self { db })
@@ -311,5 +313,34 @@ impl PvrStore {
         }
         txn.commit()?;
         Ok(())
+    }
+
+    // --- import bookkeeping (source paths already linked into the library) --
+
+    pub fn is_imported(&self, src: &str) -> Result<bool> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(IMPORTED)?;
+        Ok(table.get(src)?.is_some())
+    }
+
+    pub fn mark_imported(&self, src: &str) -> Result<()> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(IMPORTED)?;
+            table.insert(src, [1u8].as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    pub fn imported_paths(&self) -> Result<std::collections::HashSet<String>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(IMPORTED)?;
+        let mut out = std::collections::HashSet::new();
+        for entry in table.iter()? {
+            let (k, _v) = entry?;
+            out.insert(k.value().to_string());
+        }
+        Ok(out)
     }
 }

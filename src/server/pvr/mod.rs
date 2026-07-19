@@ -11,7 +11,7 @@ pub mod scan;
 pub mod store;
 pub mod xmlparse;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,8 +20,8 @@ use anyhow::{bail, Result};
 use crate::server::config::AppConfig;
 use crate::server::engine::Engine;
 use crate::types::{
-    CalendarEntry, Category, GrabHistoryEntry, Indexer, Library, MediaSearchResult, ProviderInfo,
-    QualityProfile, Release, RssFeed, WantedItem, WantedKind,
+    CalendarEntry, Category, GrabHistoryEntry, Indexer, Library, MediaKind, MediaSearchResult,
+    ProviderInfo, QualityProfile, Release, RssFeed, TorrentState, WantedItem, WantedKind,
 };
 use meta::MetadataClient;
 use store::PvrStore;
@@ -32,6 +32,64 @@ const FEED_POLL_MINS_KEY: &str = "feed_poll_mins";
 const DEFAULT_FEED_POLL_MINS: u64 = 15;
 /// How often the download tree is re-scanned into the library.
 const SCAN_INTERVAL: Duration = Duration::from_secs(3600);
+/// How often finished TV downloads are imported into Show/Season folders.
+const IMPORT_INTERVAL: Duration = Duration::from_secs(300);
+
+const VIDEO_EXTS: [&str; 9] = ["mkv", "mp4", "avi", "m4v", "mov", "ts", "webm", "mpg", "wmv"];
+
+fn is_video_name(name: &str) -> bool {
+    name.rsplit('.')
+        .next()
+        .map(|e| VIDEO_EXTS.contains(&e.to_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+/// Replace characters that are illegal/awkward in file names.
+fn sanitize(s: &str) -> String {
+    s.chars()
+        .map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// The show sub-folder name for an existing episode path (component just under a
+/// category directory), e.g. `.../TV Shows/The Show (2026)/…` → `The Show (2026)`.
+fn show_folder_of(ep_path: &str, cat_dirs: &[PathBuf]) -> Option<String> {
+    let p = Path::new(ep_path);
+    for d in cat_dirs {
+        if let Ok(rel) = p.strip_prefix(d) {
+            return rel
+                .components()
+                .next()
+                .and_then(|c| c.as_os_str().to_str())
+                .map(String::from);
+        }
+    }
+    None
+}
+
+/// Resolve `(folder_name, display_title)` for a release: reuse an existing
+/// library show's folder when the title matches, else create a new one.
+fn resolve_show(
+    parsed_title: &str,
+    library: &Library,
+    cat_dirs: &[PathBuf],
+) -> (String, String) {
+    for s in &library.shows {
+        if title_matches(&s.title, parsed_title) {
+            let folder = s
+                .episodes
+                .first()
+                .and_then(|ep| show_folder_of(&ep.path, cat_dirs))
+                .unwrap_or_else(|| s.title.clone());
+            return (folder, s.title.clone());
+        }
+    }
+    let clean = parsed_title.trim().to_string();
+    (clean.clone(), clean)
+}
 /// How often monitored wanted items are checked (≈4×/day).
 const MONITOR_INTERVAL: Duration = Duration::from_secs(6 * 3600);
 
@@ -144,6 +202,17 @@ impl Pvr {
             }
         });
 
+        // Import finished TV downloads into Show/Season folders.
+        let importer = pvr.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(IMPORT_INTERVAL);
+            loop {
+                interval.tick().await;
+                let i = importer.clone();
+                let _ = tokio::task::spawn_blocking(move || i.import_finished()).await;
+            }
+        });
+
         Ok(pvr)
     }
 
@@ -152,13 +221,100 @@ impl Pvr {
     /// Walk the download tree, rebuild the library snapshot and persist it.
     pub fn scan_library(&self) -> Library {
         let cats = self.store.list_categories().unwrap_or_default();
-        let lib = scan::scan(&self.config.download_dir, now_secs(), &cats);
+        let imported = self.store.imported_paths().unwrap_or_default();
+        let lib = scan::scan(&self.config.download_dir, now_secs(), &cats, &imported);
         let _ = self.store.set_library(&lib);
         lib
     }
 
     pub fn library(&self) -> Library {
         self.store.get_library().unwrap_or_default()
+    }
+
+    /// Hard-link finished TV-category downloads into `<cat>/<Show>/Season NN/`,
+    /// renamed `<Show> - SxxEyy.ext`. Only active torrents are considered, so the
+    /// pre-existing library is untouched. Returns the number of files imported.
+    pub fn import_finished(&self) -> usize {
+        let cats = self.store.list_categories().unwrap_or_default();
+        let library = self.store.get_library().unwrap_or_default();
+        let snapshot = self.engine.current();
+
+        let all_cat_dirs: Vec<PathBuf> = cats
+            .iter()
+            .filter_map(|c| self.category_dir(&c.subdir).ok())
+            .collect();
+        let tv_dirs: Vec<PathBuf> = cats
+            .iter()
+            .filter(|c| c.kind == MediaKind::Tv)
+            .filter_map(|c| self.category_dir(&c.subdir).ok())
+            .collect();
+
+        let mut imported = 0usize;
+        for t in &snapshot.torrents {
+            if t.pending || !matches!(t.state, TorrentState::Finished) {
+                continue;
+            }
+            let of = Path::new(&t.output_folder);
+            let Some(cat_dir) = tv_dirs.iter().find(|d| of == d.as_path() || of.starts_with(d))
+            else {
+                continue;
+            };
+            let detail = match self.engine.detail(t.id) {
+                Ok(d) => d,
+                Err(_) => continue,
+            };
+            let base = Path::new(&detail.output_folder);
+            for f in &detail.files {
+                let mut src = base.to_path_buf();
+                for comp in &f.components {
+                    src.push(comp);
+                }
+                let Some(fname) = src.file_name().and_then(|n| n.to_str()).map(String::from) else {
+                    continue;
+                };
+                if !is_video_name(&fname) {
+                    continue;
+                }
+                let src_str = src.to_string_lossy().into_owned();
+                if self.store.is_imported(&src_str).unwrap_or(false) {
+                    continue;
+                }
+
+                let parsed = quality::parse_release(&fname);
+                let se = scan::extract_se(&fname);
+                let episode = parsed.episode.or(se.1);
+                let season = parsed.season.or(se.0).or(Some(1));
+                let (Some(s), Some(e)) = (season, episode) else {
+                    continue;
+                };
+
+                let (folder, display) = resolve_show(&parsed.title, &library, &all_cat_dirs);
+                let (folder, display) = (sanitize(&folder), sanitize(&display));
+                if folder.is_empty() {
+                    continue;
+                }
+                let ext = src.extension().and_then(|x| x.to_str()).unwrap_or("mkv");
+                let target_dir = cat_dir.join(&folder).join(format!("Season {s:02}"));
+                let target = target_dir.join(format!("{display} - S{s:02}E{e:02}.{ext}"));
+
+                if target.exists() {
+                    let _ = self.store.mark_imported(&src_str);
+                    continue;
+                }
+                if std::fs::create_dir_all(&target_dir).is_err() {
+                    continue;
+                }
+                // Hard-link (keeps the download seedable); fall back to a copy.
+                let linked = std::fs::hard_link(&src, &target).is_ok()
+                    || std::fs::copy(&src, &target).is_ok();
+                if linked {
+                    let _ = self.store.mark_imported(&src_str);
+                    imported += 1;
+                    tracing::info!("imported {} -> {}", src.display(), target.display());
+                }
+            }
+        }
+        imported
     }
 
     // --- wanted / monitor --------------------------------------------------

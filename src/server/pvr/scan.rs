@@ -4,7 +4,7 @@
 //! Episodes are grouped by their show folder, so absolute-numbered anime and
 //! release-named folders still collapse into a single show.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::LazyLock;
 
@@ -106,7 +106,7 @@ fn clean_title(folder: &str) -> String {
     }
 }
 
-pub fn scan(root: &Path, now: u64, categories: &[Category]) -> Library {
+pub fn scan(root: &Path, now: u64, categories: &[Category], imported: &HashSet<String>) -> Library {
     let mut movies = Vec::new();
     let mut shows: HashMap<String, LibraryShow> = HashMap::new();
     let mut file_count = 0usize;
@@ -120,6 +120,11 @@ pub fn scan(root: &Path, now: u64, categories: &[Category]) -> Library {
             continue;
         }
         let path = entry.path();
+        // Skip loose download files that have been hard-linked into a Show folder
+        // (they're seeding duplicates of an already-organized episode).
+        if imported.contains(&path.to_string_lossy().into_owned()) {
+            continue;
+        }
         let fname = path.file_name().and_then(|f| f.to_str()).unwrap_or_default();
         file_count += 1;
 

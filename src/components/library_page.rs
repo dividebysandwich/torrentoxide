@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::api::{get_library, rescan_library};
+use crate::api::{get_library, import_now, rescan_library};
 use crate::types::{fmt_bytes, Library};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -38,6 +38,18 @@ pub fn LibraryPage() -> impl IntoView {
             }
         });
     };
+    let import = move |_| {
+        status.set("Importing finished downloads…".into());
+        spawn_local(async move {
+            match import_now().await {
+                Ok(l) => {
+                    status.set("Imported finished TV downloads into Show/Season folders.".into());
+                    library.set(l);
+                }
+                Err(e) => status.set(e.to_string()),
+            }
+        });
+    };
 
     let movies = move || library.get().movies;
     let shows = move || library.get().shows;
@@ -49,6 +61,7 @@ pub fn LibraryPage() -> impl IntoView {
             <section class="panel settings-section">
                 <div class="files-head">
                     <h2 class="page-title">"LIBRARY"</h2>
+                    <button class="btn btn-ghost btn-sm" on:click=import>"Import"</button>
                     <button class="btn btn-primary btn-sm" on:click=rescan>"Rescan"</button>
                 </div>
                 <p class="settings-hint">

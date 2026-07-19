@@ -436,6 +436,20 @@ pub async fn rescan_library() -> Result<Library, ServerFnError> {
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
+/// Import finished TV downloads into Show/Season folders, then rescan.
+#[server]
+pub async fn import_now() -> Result<Library, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    let pvr = state.pvr.clone();
+    tokio::task::spawn_blocking(move || {
+        pvr.import_finished();
+        pvr.scan_library()
+    })
+    .await
+    .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
 // --- grabbing / history -----------------------------------------------------
 
 #[server]
