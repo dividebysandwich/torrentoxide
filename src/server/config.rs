@@ -9,7 +9,7 @@ pub struct AppConfig {
     /// Default folder new torrents download into.
     pub download_dir: PathBuf,
     /// Root the remote directory browser is confined to.
-    pub browse_root: PathBuf,
+    pub library_root: PathBuf,
     /// Where librqbit persists its session state (for resume across restarts).
     pub persistence_dir: PathBuf,
     /// Optional auth. Auth is enabled only when BOTH username and password are set.
@@ -43,7 +43,7 @@ impl AppConfig {
         let download_dir = env_opt("DOWNLOAD_DIR").unwrap_or_else(|| "./downloads".to_string());
         let download_dir = ensure_dir(Path::new(&download_dir))?;
 
-        let browse_root = match env_opt("BROWSE_ROOT") {
+        let library_root = match env_opt("LIBRARY_ROOT") {
             Some(p) => ensure_dir(Path::new(&p))?,
             None => download_dir.clone(),
         };
@@ -58,7 +58,7 @@ impl AppConfig {
 
         Ok(Self {
             download_dir,
-            browse_root,
+            library_root,
             persistence_dir,
             auth_username,
             auth_password,

@@ -107,7 +107,7 @@ fn ratio(t: &TorrentView) -> f64 {
 
 /// Which category (if any) a torrent belongs to, by matching its output folder
 /// against each category's resolved directory (most specific wins). `base` is
-/// the media root (`BROWSE_ROOT`) the category sub-folders live under.
+/// the media root (`LIBRARY_ROOT`) the category sub-folders live under.
 fn match_category(output_folder: &str, cats: &[Category], base: &str) -> Option<String> {
     let dl = base.trim_end_matches('/');
     let of = output_folder.trim_end_matches('/');
@@ -146,7 +146,7 @@ pub fn TorrentList() -> impl IntoView {
         let sf = status.get();
         let cat = cat_filter.get();
         let cats = state.categories.get();
-        let dl = state.defaults.get().browse_root;
+        let dl = state.defaults.get().library_root;
         let key = sort_key.get();
         let desc = sort_desc.get();
 

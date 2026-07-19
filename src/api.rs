@@ -13,11 +13,11 @@ use crate::types::{
 pub async fn add_torrent(req: AddRequest) -> Result<(), ServerFnError> {
     use crate::server::AppState;
     let state = expect_context::<AppState>();
-    // Non-blocking: validates the target dir now, resolves metadata in the
-    // background, and surfaces progress/errors via the live stats stream.
+    // Non-blocking: downloads into the staging area, then moves to the chosen
+    // folder (`output_dir`) once complete. Resolves metadata in the background.
     state
-        .engine
-        .spawn_add_url(req.source, req.output_dir, req.paused, req.only_files)
+        .pvr
+        .add_url_staged(req.source, req.output_dir, req.paused, req.only_files)
         .map_err(|e| ServerFnError::new(e.to_string()))?;
     Ok(())
 }
@@ -116,7 +116,7 @@ pub async fn get_defaults() -> Result<Defaults, ServerFnError> {
     let state = expect_context::<AppState>();
     Ok(Defaults {
         download_dir: state.config.download_dir.to_string_lossy().into_owned(),
-        browse_root: state.config.browse_root.to_string_lossy().into_owned(),
+        library_root: state.config.library_root.to_string_lossy().into_owned(),
         auth_enabled: state.config.auth_enabled(),
     })
 }

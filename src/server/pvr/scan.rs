@@ -106,7 +106,13 @@ fn clean_title(folder: &str) -> String {
     }
 }
 
-pub fn scan(root: &Path, now: u64, categories: &[Category], imported: &HashSet<String>) -> Library {
+pub fn scan(
+    root: &Path,
+    skip: Option<&Path>,
+    now: u64,
+    categories: &[Category],
+    imported: &HashSet<String>,
+) -> Library {
     let mut movies = Vec::new();
     let mut shows: HashMap<String, LibraryShow> = HashMap::new();
     let mut file_count = 0usize;
@@ -114,6 +120,8 @@ pub fn scan(root: &Path, now: u64, categories: &[Category], imported: &HashSet<S
     for entry in WalkDir::new(root)
         .follow_links(false)
         .into_iter()
+        // Prune the incoming/download area so it isn't walked at all.
+        .filter_entry(|e| skip.map_or(true, |s| !e.path().starts_with(s)))
         .filter_map(|e| e.ok())
     {
         if !entry.file_type().is_file() || !is_video(entry.path()) {

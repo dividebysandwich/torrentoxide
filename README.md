@@ -171,10 +171,11 @@ works fine without touching any of it.
 ### Settings
 
 - **Categories** — map a name (e.g. *Movies*, *TV Shows*) to a sub-folder under
-  the download directory, tagged as **Movie**, **TV**, or **Other**. New
-  downloads can target a category (which sets the save folder), the torrent list
-  can be filtered by category, and the category *kind* drives how the library
-  classifies files.
+  the **media library root** (`LIBRARY_ROOT`), tagged as **Movie**, **TV**, or
+  **Other**. A download can target a category, which is where the finished
+  download is **imported** (the download itself always lands in `DOWNLOAD_DIR`
+  first). The torrent list can be filtered by category, and the category *kind*
+  drives how the library classifies files and organizes TV.
 - **Quality profiles** — define what releases are acceptable and how upgrades are
   chosen: a minimum and a cutoff resolution, an HDR preference
   (*ignore / prefer / require*), required languages, and whether upgrades are
@@ -212,28 +213,35 @@ works fine without touching any of it.
 
 ### Library & import
 
-- **Library** — scans the download tree into **Movies** and **TV Shows**
-  (separate tabs). Classification uses the category *kind* first, then folder
-  layout (`TV Shows/<Show>/…`), then filename parsing (handles `S01E04`, `1x04`,
-  `SxxMxx` specials, and absolute anime numbering); episodes are grouped by show.
-  Rescans run hourly or on demand.
-- **Import** — organizes finished TV downloads into
-  `<category>/<Show>/Season NN/<Show> - SxxEyy.ext`, matching an existing show
-  folder when possible. Pick the mode on the Library page:
-  - **Move** *(default)* — relocates the file so there's a single clean copy, and
-    forgets the torrent so it isn't re-downloaded. Best when your download folder
-    **is** the folder your media server (Jellyfin/Plex) scans.
-  - **Hardlink** — links the file into place and keeps the download seedable. Best
-    when your download folder is **separate** from the library your media server
-    scans (otherwise it would see the original and the link as duplicates).
-  - **Copy** — a full second copy (doubles disk), keeps seeding.
+- **Library** — scans the media library (`LIBRARY_ROOT`) into **Movies** and
+  **TV Shows** (separate tabs), excluding the incoming download area. Classification
+  uses the category *kind* first, then folder layout (`TV Shows/<Show>/…`), then
+  filename parsing (handles `S01E04`, `1x04`, `SxxMxx` specials, and absolute anime
+  numbering); episodes are grouped by show. Rescans run hourly, on demand, and
+  right after an import.
+- **Import** — every download (automated grabs **and** manual adds) lands in
+  `DOWNLOAD_DIR` first (staged under `.incoming`), then is moved into the library
+  **automatically as soon as it finishes** — no button press needed (a Library-page
+  button and a periodic sweep are fallbacks):
+  - **Automated grabs** go to their category folder; TV is organized into
+    `<category>/<Show>/Season NN/<Show> - SxxEyy.ext`, matching an existing show
+    folder when possible.
+  - **Manual adds** move as-is into the folder you chose.
+
+  Pick the mode on the Library page:
+  - **Move** *(default)* — relocates the file into the library so there's a single
+    clean copy, and forgets the torrent so it isn't re-downloaded.
+  - **Hardlink** — links the file into the library and keeps the download seeding
+    from `DOWNLOAD_DIR` (requires `DOWNLOAD_DIR` and `LIBRARY_ROOT` on the same
+    filesystem — which they are when `DOWNLOAD_DIR` is a sub-folder of it).
+  - **Copy** — a full second copy in the library (doubles disk), keeps seeding.
 
 ## Configuration (`.env`)
 
 | Variable            | Default            | Purpose                                                        |
 | ------------------- | ------------------ | -------------------------------------------------------------- |
-| `DOWNLOAD_DIR`      | `./downloads`      | Default folder new torrents download into.                     |
-| `BROWSE_ROOT`       | = `DOWNLOAD_DIR`   | Root the remote directory browser is confined to.              |
+| `LIBRARY_ROOT`      | = `DOWNLOAD_DIR`   | Media library root: category folders live under it, finished downloads are organized into them, and the file browser is confined to it. |
+| `DOWNLOAD_DIR`      | `./downloads`      | Incoming folder new torrents download into (staged under `.incoming`) before being moved into the library on completion. |
 | `PERSISTENCE_DIR`   | `./.rqbit-session` | Where session + PVR state is stored (`pvr.redb` lives here).   |
 | `LEPTOS_SITE_ADDR`  | `127.0.0.1:3000`   | Address the server binds to.                                   |
 | `TMDB_API_KEY`      | *(unset)*          | Optional TMDb key for the library/wanted/calendar features (also settable in the UI). |
@@ -248,6 +256,6 @@ works fine without touching any of it.
 ## Security notes
 
 - The directory browser and all save paths are canonicalized and confined to
-  `BROWSE_ROOT` (path-traversal and symlink escapes are rejected).
+  `LIBRARY_ROOT` (path-traversal and symlink escapes are rejected).
 - Authentication uses a stateless signed cookie. Logging out clears the browser cookie;
   set a strong `SESSION_SECRET` and serve behind HTTPS in production.

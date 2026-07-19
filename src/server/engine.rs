@@ -861,7 +861,7 @@ impl Engine {
     pub fn browse(&self, path: Option<String>) -> anyhow::Result<DirListing> {
         let dir = match path {
             Some(p) if !p.trim().is_empty() => self.confine(&p)?,
-            _ => self.config.browse_root.clone(),
+            _ => self.config.library_root.clone(),
         };
         if !dir.is_dir() {
             bail!("{} is not a directory", dir.display());
@@ -882,7 +882,7 @@ impl Engine {
         }
         entries.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
 
-        let parent = if dir == self.config.browse_root {
+        let parent = if dir == self.config.library_root {
             None
         } else {
             dir.parent().map(|p| p.to_string_lossy().into_owned())
@@ -910,7 +910,7 @@ impl Engine {
         self.browse(Some(base.to_string_lossy().into_owned()))
     }
 
-    /// Resolve a requested path and assert it lives inside `browse_root`.
+    /// Resolve a requested path and assert it lives inside `library_root`.
     /// Handles paths that don't exist yet (new folders) and resolves symlinks
     /// on the existing prefix to prevent escapes.
     pub fn confine(&self, requested: &str) -> anyhow::Result<PathBuf> {
@@ -918,7 +918,7 @@ impl Engine {
         let abs = if req.is_absolute() {
             req.to_path_buf()
         } else {
-            self.config.browse_root.join(req)
+            self.config.library_root.join(req)
         };
         let normalized = normalize_lexical(&abs);
 
@@ -943,11 +943,11 @@ impl Engine {
             full.push(name);
         }
 
-        if !full.starts_with(&self.config.browse_root) {
+        if !full.starts_with(&self.config.library_root) {
             bail!(
                 "path {} is outside the allowed root {}",
                 full.display(),
-                self.config.browse_root.display()
+                self.config.library_root.display()
             );
         }
         Ok(full)

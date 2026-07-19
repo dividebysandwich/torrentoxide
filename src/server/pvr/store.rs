@@ -7,6 +7,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 
+use super::DownloadTarget;
 use crate::types::{
     Category, GrabHistoryEntry, Indexer, Library, QualityProfile, RssFeed, WantedItem,
 };
@@ -22,6 +23,8 @@ const GRAB_BLACKLIST: TableDefinition<&str, &[u8]> = TableDefinition::new("grab_
 const LIBRARY: TableDefinition<&str, &[u8]> = TableDefinition::new("library");
 const WANTED: TableDefinition<&str, &[u8]> = TableDefinition::new("wanted");
 const IMPORTED: TableDefinition<&str, &[u8]> = TableDefinition::new("imported");
+/// Staging token → where the finished download should be moved.
+const DOWNLOAD_TARGETS: TableDefinition<&str, &[u8]> = TableDefinition::new("download_targets");
 
 pub struct PvrStore {
     db: Database,
@@ -45,6 +48,7 @@ impl PvrStore {
             let _ = txn.open_table(LIBRARY)?;
             let _ = txn.open_table(WANTED)?;
             let _ = txn.open_table(IMPORTED)?;
+            let _ = txn.open_table(DOWNLOAD_TARGETS)?;
         }
         txn.commit()?;
         Ok(Self { db })
@@ -385,5 +389,36 @@ impl PvrStore {
             out.insert(k.value().to_string());
         }
         Ok(out)
+    }
+
+    // --- download targets (staged download → final destination) -------------
+
+    pub fn set_download_target(&self, token: &str, t: &DownloadTarget) -> Result<()> {
+        let bytes = serde_json::to_vec(t)?;
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(DOWNLOAD_TARGETS)?;
+            table.insert(token, bytes.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    pub fn get_download_target(&self, token: &str) -> Result<Option<DownloadTarget>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(DOWNLOAD_TARGETS)?;
+        Ok(table
+            .get(token)?
+            .and_then(|v| serde_json::from_slice::<DownloadTarget>(v.value()).ok()))
+    }
+
+    pub fn remove_download_target(&self, token: &str) -> Result<()> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(DOWNLOAD_TARGETS)?;
+            table.remove(token)?;
+        }
+        txn.commit()?;
+        Ok(())
     }
 }

@@ -54,7 +54,8 @@ pub async fn upload_handler(
         return resp;
     }
 
-    match state.engine.add_bytes(bytes, output_dir, paused, only_files).await {
+    // Download into the staging area, then move to `output_dir` on completion.
+    match state.pvr.add_bytes_staged(bytes, output_dir, paused, only_files).await {
         Ok(()) => StatusCode::OK.into_response(),
         Err(e) => (StatusCode::BAD_REQUEST, e.to_string()).into_response(),
     }

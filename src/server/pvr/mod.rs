@@ -13,6 +13,7 @@ pub mod xmlparse;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -39,8 +40,25 @@ const IMPORT_MODE_KEY: &str = "import_mode";
 /// Forget in-flight grab tracking after this long — a grab resolves (success or
 /// the broadcast failure) well within the engine's resolve timeout.
 const GRAB_TRACK_TTL: u64 = 900;
+/// Sub-folder of DOWNLOAD_DIR that in-progress downloads are staged in before
+/// being moved to their final destination on completion. Excluded from library
+/// scans so incoming downloads never pollute the library.
+const INCOMING_DIR: &str = ".incoming";
 
 const VIDEO_EXTS: [&str; 9] = ["mkv", "mp4", "avi", "m4v", "mov", "ts", "webm", "mpg", "wmv"];
+
+/// Where a staged download should be moved once it finishes. Every download
+/// (automated or manual) lands in `DOWNLOAD_DIR/.incoming/<token>` first; this
+/// records the destination, keyed by that token, so completion can relocate it.
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
+pub struct DownloadTarget {
+    /// Final destination folder (a category folder or a user-chosen folder).
+    pub target_dir: String,
+    /// Organize video files into `<target>/<Show>/Season NN/…` (TV categories).
+    pub organize_tv: bool,
+    /// Unix seconds when staged.
+    pub added_at: u64,
+}
 
 /// Recovery context for an in-flight PVR grab, keyed by its release URL. If the
 /// download fails (metadata fetch), this drives a re-search for an alternative
@@ -89,6 +107,24 @@ fn is_video_name(name: &str) -> bool {
         .next()
         .map(|e| VIDEO_EXTS.contains(&e.to_lowercase().as_str()))
         .unwrap_or(false)
+}
+
+/// Remove empty directories under `root` (deepest first, then `root` itself).
+/// Never deletes files, so any leftover (e.g. subtitles) keeps its folder.
+fn remove_empty_dirs(root: &Path) {
+    if !root.exists() {
+        return;
+    }
+    let mut dirs: Vec<PathBuf> = walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_dir())
+        .map(|e| e.path().to_path_buf())
+        .collect();
+    dirs.sort_by_key(|p| std::cmp::Reverse(p.components().count()));
+    for d in dirs {
+        let _ = std::fs::remove_dir(&d);
+    }
 }
 
 /// Replace characters that are illegal/awkward in file names.
@@ -195,6 +231,8 @@ pub struct Pvr {
     http: reqwest::Client,
     /// In-flight grabs (release URL → recovery context) for failure recovery.
     grabs: Mutex<HashMap<String, GrabContext>>,
+    /// Monotonic counter for unique staging-folder tokens.
+    stage_seq: AtomicU64,
 }
 
 impl Pvr {
@@ -208,6 +246,7 @@ impl Pvr {
             meta: MetadataClient::new(),
             http: reqwest::Client::new(),
             grabs: Mutex::new(HashMap::new()),
+            stage_seq: AtomicU64::new(0),
         });
 
         // Poll auto-download RSS feeds on a fixed interval (first tick fires soon
@@ -309,7 +348,7 @@ impl Pvr {
 
     // --- library -----------------------------------------------------------
 
-    /// Walk the media root (`BROWSE_ROOT`, under which the category folders and
+    /// Walk the media root (`LIBRARY_ROOT`, under which the category folders and
     /// organized library live — the download folder is normally a sub-folder of
     /// it), rebuild the library snapshot and persist it. Scanning the media root
     /// rather than just the download folder is what lets the monitor see media
@@ -317,7 +356,18 @@ impl Pvr {
     pub fn scan_library(&self) -> Library {
         let cats = self.store.list_categories().unwrap_or_default();
         let imported = self.store.imported_paths().unwrap_or_default();
-        let lib = scan::scan(&self.config.browse_root, now_secs(), &cats, &imported);
+        // Exclude the incoming/download area so in-progress downloads never
+        // pollute the library: when the download folder is a separate sub-folder
+        // of the media root, skip all of it; in a single-folder setup skip just
+        // the staging sub-folder.
+        let root = &self.config.library_root;
+        let dl = &self.config.download_dir;
+        let skip = if dl != root && dl.starts_with(root) {
+            dl.clone()
+        } else {
+            dl.join(INCOMING_DIR)
+        };
+        let lib = scan::scan(root, Some(&skip), now_secs(), &cats, &imported);
         let _ = self.store.set_library(&lib);
         lib
     }
@@ -357,110 +407,155 @@ impl Pvr {
         count
     }
 
-    /// Place finished TV-category downloads into `<cat>/<Show>/Season NN/`, renamed
-    /// `<Show> - SxxEyy.ext`, using the configured import mode. Only active torrents
-    /// are considered, so the pre-existing library is untouched. Returns
-    /// `(files_imported, torrent_ids_to_forget)` (the latter only for Move).
+    /// Move finished staged downloads to their recorded destination. Automated TV
+    /// downloads are organized into `<target>/<Show>/Season NN/<Show> - SxxEyy.ext`;
+    /// everything else is moved as-is, preserving the release's folder structure.
+    /// Uses the configured import mode (Move relocates and the torrent is later
+    /// forgotten; Hardlink/Copy keep it seeding from the staging area). Returns
+    /// `(files_placed, torrent_ids_to_forget)`.
     pub fn import_finished(&self) -> (usize, Vec<u64>) {
         let mode = parse_import_mode(&self.import_mode());
-        let cats = self.store.list_categories().unwrap_or_default();
         let library = self.store.get_library().unwrap_or_default();
         let snapshot = self.engine.current();
+        let incoming = self.config.download_dir.join(INCOMING_DIR);
 
-        let all_cat_dirs: Vec<PathBuf> = cats
-            .iter()
-            .filter_map(|c| self.category_dir(&c.subdir).ok())
-            .collect();
-        let tv_dirs: Vec<PathBuf> = cats
-            .iter()
-            .filter(|c| c.kind == MediaKind::Tv)
-            .filter_map(|c| self.category_dir(&c.subdir).ok())
-            .collect();
+        let mut placed_total = 0usize;
+        let mut forget: HashSet<u64> = HashSet::new();
 
-        let mut imported = 0usize;
-        let mut moved: std::collections::HashSet<u64> = std::collections::HashSet::new();
         for t in &snapshot.torrents {
             if t.pending || !matches!(t.state, TorrentState::Finished) {
                 continue;
             }
+            // Staging token = first path component under DOWNLOAD_DIR/.incoming.
             let of = Path::new(&t.output_folder);
-            let Some(cat_dir) = tv_dirs.iter().find(|d| of == d.as_path() || of.starts_with(d))
+            let Some(token) = of
+                .strip_prefix(&incoming)
+                .ok()
+                .and_then(|rel| rel.components().next())
+                .and_then(|c| c.as_os_str().to_str())
+                .map(str::to_string)
             else {
-                continue;
+                continue; // not one of our staged downloads
+            };
+            let Some(tgt) = self.store.get_download_target(&token).ok().flatten() else {
+                continue; // no destination recorded (already handled, or foreign)
             };
             let detail = match self.engine.detail(t.id) {
                 Ok(d) => d,
                 Err(_) => continue,
             };
             let base = Path::new(&detail.output_folder);
+            let target_root = Path::new(&tgt.target_dir);
+
+            let mut failures = 0usize; // attempted-but-not-placed files
             for f in &detail.files {
                 let mut src = base.to_path_buf();
                 for comp in &f.components {
                     src.push(comp);
                 }
+                let src_str = src.to_string_lossy().into_owned();
+                if self.store.is_imported(&src_str).unwrap_or(false) {
+                    continue; // already placed in a previous pass (hardlink/copy)
+                }
                 let Some(fname) = src.file_name().and_then(|n| n.to_str()).map(String::from) else {
                     continue;
                 };
-                if !is_video_name(&fname) {
-                    continue;
-                }
-                let src_str = src.to_string_lossy().into_owned();
-                if self.store.is_imported(&src_str).unwrap_or(false) {
-                    continue;
-                }
 
-                let parsed = quality::parse_release(&fname);
-                let se = scan::extract_se(&fname);
-                let episode = parsed.episode.or(se.1);
-                let season = parsed.season.or(se.0).or(Some(1));
-                let (Some(s), Some(e)) = (season, episode) else {
-                    continue;
+                // Decide this file's destination.
+                let dest: Option<PathBuf> = if tgt.organize_tv {
+                    if !is_video_name(&fname) {
+                        continue; // leave subs/nfo behind for organized TV
+                    }
+                    let parsed = quality::parse_release(&fname);
+                    let se = scan::extract_se(&fname);
+                    let episode = parsed.episode.or(se.1);
+                    let season = parsed.season.or(se.0).or(Some(1));
+                    match (season, episode) {
+                        (Some(s), Some(e)) => {
+                            let (folder, display) =
+                                resolve_show(&parsed.title, &library, &[target_root.to_path_buf()]);
+                            let (folder, display) = (sanitize(&folder), sanitize(&display));
+                            if folder.is_empty() {
+                                None
+                            } else {
+                                let ext = src.extension().and_then(|x| x.to_str()).unwrap_or("mkv");
+                                Some(
+                                    target_root
+                                        .join(&folder)
+                                        .join(format!("Season {s:02}"))
+                                        .join(format!("{display} - S{s:02}E{e:02}.{ext}")),
+                                )
+                            }
+                        }
+                        _ => None, // couldn't derive S/E
+                    }
+                } else {
+                    // Move as-is: recreate the release's structure under the target.
+                    let mut d = target_root.to_path_buf();
+                    for comp in &f.components {
+                        d.push(comp);
+                    }
+                    Some(d)
                 };
 
-                let (folder, display) = resolve_show(&parsed.title, &library, &all_cat_dirs);
-                let (folder, display) = (sanitize(&folder), sanitize(&display));
-                if folder.is_empty() {
+                let Some(dest) = dest else {
+                    failures += 1;
                     continue;
-                }
-                let ext = src.extension().and_then(|x| x.to_str()).unwrap_or("mkv");
-                let target_dir = cat_dir.join(&folder).join(format!("Season {s:02}"));
-                let target = target_dir.join(format!("{display} - S{s:02}E{e:02}.{ext}"));
-
-                if target.exists() {
-                    // Already organized; in Move mode drop the redundant download.
-                    if mode == ImportMode::Move {
-                        let _ = std::fs::remove_file(&src);
-                        moved.insert(t.id);
-                    }
-                    let _ = self.store.mark_imported(&src_str);
-                    continue;
-                }
-                if std::fs::create_dir_all(&target_dir).is_err() {
-                    continue;
-                }
-                let placed = match mode {
-                    ImportMode::Move => {
-                        std::fs::rename(&src, &target).is_ok()
-                            || (std::fs::copy(&src, &target).is_ok()
-                                && std::fs::remove_file(&src).is_ok())
-                    }
-                    ImportMode::Hardlink => {
-                        std::fs::hard_link(&src, &target).is_ok()
-                            || std::fs::copy(&src, &target).is_ok()
-                    }
-                    ImportMode::Copy => std::fs::copy(&src, &target).is_ok(),
                 };
-                if placed {
-                    let _ = self.store.mark_imported(&src_str);
-                    imported += 1;
-                    if mode == ImportMode::Move {
-                        moved.insert(t.id);
+                match self.place_file(&src, &dest, mode) {
+                    Ok(placed_now) => {
+                        let _ = self.store.mark_imported(&src_str);
+                        if mode == ImportMode::Move {
+                            forget.insert(t.id);
+                        }
+                        if placed_now {
+                            placed_total += 1;
+                            tracing::info!("imported {} -> {}", src.display(), dest.display());
+                        }
                     }
-                    tracing::info!("imported {} -> {}", src.display(), target.display());
+                    Err(_) => failures += 1,
                 }
             }
+
+            if failures == 0 {
+                // Everything intended has been placed: finalize this download.
+                if mode == ImportMode::Move {
+                    forget.insert(t.id);
+                    remove_empty_dirs(&incoming.join(&token));
+                }
+                let _ = self.store.remove_download_target(&token);
+            }
         }
-        (imported, moved.into_iter().collect())
+        (placed_total, forget.into_iter().collect())
+    }
+
+    /// Place `src` at `dest` per `mode`. `Ok(true)` = placed now; `Ok(false)` =
+    /// `dest` already existed (staged copy dropped in Move mode); `Err` = failed.
+    fn place_file(&self, src: &Path, dest: &Path, mode: ImportMode) -> Result<bool> {
+        if dest.exists() {
+            if mode == ImportMode::Move {
+                let _ = std::fs::remove_file(src);
+            }
+            return Ok(false);
+        }
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let ok = match mode {
+            ImportMode::Move => {
+                std::fs::rename(src, dest).is_ok()
+                    || (std::fs::copy(src, dest).is_ok() && std::fs::remove_file(src).is_ok())
+            }
+            ImportMode::Hardlink => {
+                std::fs::hard_link(src, dest).is_ok() || std::fs::copy(src, dest).is_ok()
+            }
+            ImportMode::Copy => std::fs::copy(src, dest).is_ok(),
+        };
+        if ok {
+            Ok(true)
+        } else {
+            bail!("failed to place {}", src.display())
+        }
     }
 
     // --- wanted / monitor --------------------------------------------------
@@ -779,19 +874,70 @@ impl Pvr {
 
     // --- grabbing / history ------------------------------------------------
 
-    /// Resolve a category slug to an absolute download path (default dir if unset).
-    pub fn category_path(&self, slug: &str) -> String {
-        if slug.trim().is_empty() {
-            return self.config.download_dir.to_string_lossy().into_owned();
-        }
-        if let Ok(cats) = self.store.list_categories() {
-            if let Some(c) = cats.iter().find(|c| c.slug == slug) {
-                if let Ok(dir) = self.category_dir(&c.subdir) {
-                    return dir.to_string_lossy().into_owned();
+    /// Resolve a category slug to its `(final destination folder, organize-as-TV)`.
+    /// Empty/unknown slug → the download folder, no organization.
+    fn category_target(&self, slug: &str) -> (String, bool) {
+        if !slug.trim().is_empty() {
+            if let Ok(cats) = self.store.list_categories() {
+                if let Some(c) = cats.iter().find(|c| c.slug == slug) {
+                    if let Ok(dir) = self.category_dir(&c.subdir) {
+                        return (dir.to_string_lossy().into_owned(), c.kind == MediaKind::Tv);
+                    }
                 }
             }
         }
-        self.config.download_dir.to_string_lossy().into_owned()
+        (self.config.download_dir.to_string_lossy().into_owned(), false)
+    }
+
+    /// Reserve a unique `DOWNLOAD_DIR/.incoming/<token>` staging folder for a new
+    /// download and record where it should be moved on completion. Returns the
+    /// absolute staging folder to download into. `target_dir` is confined to the
+    /// media root (defense in depth); empty → the download folder.
+    fn stage_download(&self, target_dir: String, organize_tv: bool) -> Result<String> {
+        let requested = if target_dir.trim().is_empty() {
+            self.config.download_dir.to_string_lossy().into_owned()
+        } else {
+            target_dir
+        };
+        let confined = self.engine.confine(&requested)?;
+        let target_dir = confined.to_string_lossy().into_owned();
+
+        let token = format!("{}-{}", now_secs(), self.stage_seq.fetch_add(1, Ordering::Relaxed));
+        self.store.set_download_target(
+            &token,
+            &DownloadTarget { target_dir, organize_tv, added_at: now_secs() },
+        )?;
+        let staged = self
+            .config
+            .download_dir
+            .join(INCOMING_DIR)
+            .join(&token);
+        Ok(staged.to_string_lossy().into_owned())
+    }
+
+    /// Manually add a magnet/URL: download into the staging area, then move to
+    /// `target_dir` on completion (no TV organization — the user chose the folder).
+    pub fn add_url_staged(
+        self: &Arc<Self>,
+        source: String,
+        target_dir: String,
+        paused: bool,
+        only_files: Option<Vec<usize>>,
+    ) -> Result<()> {
+        let staged = self.stage_download(target_dir, false)?;
+        self.engine.spawn_add_url(source, staged, paused, only_files)
+    }
+
+    /// Manually add from `.torrent` bytes, staged like [`Self::add_url_staged`].
+    pub async fn add_bytes_staged(
+        self: &Arc<Self>,
+        bytes: Vec<u8>,
+        target_dir: String,
+        paused: bool,
+        only_files: Option<Vec<usize>>,
+    ) -> Result<()> {
+        let staged = self.stage_download(target_dir, false)?;
+        self.engine.add_bytes(bytes, staged, paused, only_files).await
     }
 
     /// Start a download and record it in grab history under dedup key `id`
@@ -832,8 +978,11 @@ impl Pvr {
         title: &str,
         score: i64,
     ) -> Result<()> {
-        let path = self.category_path(&ctx.category);
-        self.engine.spawn_add_url(url.to_string(), path, false, None)?;
+        // Download into the staging area; move to the category folder (organizing
+        // TV into Show/Season) once it finishes.
+        let (target_dir, organize_tv) = self.category_target(&ctx.category);
+        let staged = self.stage_download(target_dir, organize_tv)?;
+        self.engine.spawn_add_url(url.to_string(), staged, false, None)?;
         self.store.record_grab(&GrabHistoryEntry {
             id: ctx.dedup_id.clone(),
             title: title.to_string(),
@@ -974,14 +1123,14 @@ impl Pvr {
     }
 
     /// Resolve a category's sub-directory to an absolute path under the media
-    /// root (`BROWSE_ROOT`), where the organized library lives — not under the
+    /// root (`LIBRARY_ROOT`), where the organized library lives — not under the
     /// download folder. Routes through the engine's path-traversal guard.
     fn category_dir(&self, subdir: &str) -> Result<PathBuf> {
         let sub = subdir.trim().trim_start_matches(['/', '\\']);
-        let joined = self.config.browse_root.join(sub);
+        let joined = self.config.library_root.join(sub);
         let confined = self.engine.confine(&joined.to_string_lossy())?;
-        if !confined.starts_with(&self.config.browse_root) {
-            bail!("category directory must be under the media root (BROWSE_ROOT)");
+        if !confined.starts_with(&self.config.library_root) {
+            bail!("category directory must be under the media root (LIBRARY_ROOT)");
         }
         Ok(confined)
     }

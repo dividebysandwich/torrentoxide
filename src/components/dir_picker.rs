@@ -6,7 +6,7 @@ use crate::api::{browse_dir, make_dir};
 use crate::components::dashboard_state;
 use crate::types::DirListing;
 
-/// Remote directory browser modal, confined server-side to `BROWSE_ROOT`.
+/// Remote directory browser modal, confined server-side to `LIBRARY_ROOT`.
 #[component]
 pub fn DirPicker(
     open: RwSignal<bool>,

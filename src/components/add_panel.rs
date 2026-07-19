@@ -31,7 +31,7 @@ pub fn AddTorrentPanel() -> impl IntoView {
         if slug.is_empty() {
             return None;
         }
-        let base = state.defaults.get().browse_root;
+        let base = state.defaults.get().library_root;
         state.categories.get().iter().find(|c| c.slug == slug).map(|c| {
             if base.is_empty() {
                 c.subdir.clone()

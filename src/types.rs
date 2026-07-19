@@ -542,7 +542,7 @@ pub struct TrackerInfo {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Defaults {
     pub download_dir: String,
-    pub browse_root: String,
+    pub library_root: String,
     pub auth_enabled: bool,
 }
 
