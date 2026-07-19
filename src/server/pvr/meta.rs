@@ -49,6 +49,86 @@ impl MetadataClient {
             .await?;
         Ok(body.results.into_iter().filter_map(SearchItem::into_meta).collect())
     }
+
+    /// All episodes of a series that have aired on/before `today` (YYYY-MM-DD).
+    pub async fn series_aired_episodes(
+        &self,
+        key: &str,
+        tmdb_id: i64,
+        today: &str,
+    ) -> Result<Vec<AiredEpisode>> {
+        let details: TvDetails = self
+            .http
+            .get(format!("{TMDB_BASE}/tv/{tmdb_id}"))
+            .query(&[("api_key", key)])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let mut out = Vec::new();
+        for n in details.seasons.iter().map(|s| s.season_number).filter(|n| *n >= 1) {
+            let resp = match self
+                .http
+                .get(format!("{TMDB_BASE}/tv/{tmdb_id}/season/{n}"))
+                .query(&[("api_key", key)])
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let season: TvSeason = match resp.json().await {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            for ep in season.episodes {
+                let aired = ep
+                    .air_date
+                    .as_deref()
+                    .map(|d| !d.is_empty() && d <= today)
+                    .unwrap_or(false);
+                if aired {
+                    out.push(AiredEpisode {
+                        season: n,
+                        episode: ep.episode_number,
+                    });
+                }
+            }
+        }
+        Ok(out)
+    }
+}
+
+/// A single aired episode identified by season + episode number.
+#[derive(Clone, Copy, Debug)]
+pub struct AiredEpisode {
+    pub season: i32,
+    pub episode: i32,
+}
+
+#[derive(Deserialize)]
+struct TvDetails {
+    #[serde(default)]
+    seasons: Vec<TvSeasonBrief>,
+}
+
+#[derive(Deserialize)]
+struct TvSeasonBrief {
+    season_number: i32,
+}
+
+#[derive(Deserialize)]
+struct TvSeason {
+    #[serde(default)]
+    episodes: Vec<TvEpisode>,
+}
+
+#[derive(Deserialize)]
+struct TvEpisode {
+    episode_number: i32,
+    air_date: Option<String>,
 }
 
 #[derive(Deserialize)]

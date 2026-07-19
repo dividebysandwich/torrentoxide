@@ -6,7 +6,7 @@ use leptos::prelude::*;
 use crate::types::{
     AddRequest, Category, Defaults, DirListing, FileEntry, GrabHistoryEntry, Indexer, Library,
     MediaSearchResult, ProviderInfo, QualityProfile, Release, RssFeed, Settings, TorrentDetail,
-    TorrentView,
+    TorrentView, WantedItem,
 };
 
 #[server]
@@ -346,6 +346,49 @@ pub async fn poll_feeds_now() -> Result<usize, ServerFnError> {
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
+// --- wanted / monitor -------------------------------------------------------
+
+#[server]
+pub async fn list_wanted() -> Result<Vec<WantedItem>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .list_wanted()
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn add_wanted(item: WantedItem) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .add_wanted(item)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn remove_wanted(id: String) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .remove_wanted(&id)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn run_monitor_now() -> Result<usize, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .run_monitor()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
 // --- library ----------------------------------------------------------------
 
 #[server]
@@ -377,7 +420,7 @@ pub async fn grab_release(
     let state = expect_context::<AppState>();
     state
         .pvr
-        .grab_release(&url, &title, &category, "search", 0)
+        .grab_release(&url, &url, &title, &category, "search", 0)
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 

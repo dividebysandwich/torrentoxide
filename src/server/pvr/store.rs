@@ -7,7 +7,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use redb::{Database, ReadableTable, TableDefinition};
 
-use crate::types::{Category, GrabHistoryEntry, Indexer, Library, QualityProfile, RssFeed};
+use crate::types::{
+    Category, GrabHistoryEntry, Indexer, Library, QualityProfile, RssFeed, WantedItem,
+};
 
 const CATEGORIES: TableDefinition<&str, &[u8]> = TableDefinition::new("categories");
 const QUALITY_PROFILES: TableDefinition<&str, &[u8]> = TableDefinition::new("quality_profiles");
@@ -16,6 +18,7 @@ const INDEXERS: TableDefinition<&str, &[u8]> = TableDefinition::new("indexers");
 const FEEDS: TableDefinition<&str, &[u8]> = TableDefinition::new("feeds");
 const GRAB_HISTORY: TableDefinition<&str, &[u8]> = TableDefinition::new("grab_history");
 const LIBRARY: TableDefinition<&str, &[u8]> = TableDefinition::new("library");
+const WANTED: TableDefinition<&str, &[u8]> = TableDefinition::new("wanted");
 
 pub struct PvrStore {
     db: Database,
@@ -36,6 +39,7 @@ impl PvrStore {
             let _ = txn.open_table(FEEDS)?;
             let _ = txn.open_table(GRAB_HISTORY)?;
             let _ = txn.open_table(LIBRARY)?;
+            let _ = txn.open_table(WANTED)?;
         }
         txn.commit()?;
         Ok(Self { db })
@@ -267,6 +271,43 @@ impl PvrStore {
         {
             let mut table = txn.open_table(LIBRARY)?;
             table.insert("current", bytes.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    // --- wanted ------------------------------------------------------------
+
+    pub fn list_wanted(&self) -> Result<Vec<WantedItem>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(WANTED)?;
+        let mut out = Vec::new();
+        for entry in table.iter()? {
+            let (_k, v) = entry?;
+            if let Ok(w) = serde_json::from_slice::<WantedItem>(v.value()) {
+                out.push(w);
+            }
+        }
+        out.sort_by(|a, b| a.title.to_lowercase().cmp(&b.title.to_lowercase()));
+        Ok(out)
+    }
+
+    pub fn upsert_wanted(&self, w: &WantedItem) -> Result<()> {
+        let bytes = serde_json::to_vec(w)?;
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(WANTED)?;
+            table.insert(w.id.as_str(), bytes.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_wanted(&self, id: &str) -> Result<()> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(WANTED)?;
+            table.remove(id)?;
         }
         txn.commit()?;
         Ok(())

@@ -360,6 +360,40 @@ pub struct GrabHistoryEntry {
     pub grabbed_at: u64,
 }
 
+/// Whether a wanted entry is a movie or a monitored series.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WantedKind {
+    Movie,
+    Series,
+}
+
+impl WantedKind {
+    pub fn label(&self) -> &'static str {
+        match self {
+            WantedKind::Movie => "movie",
+            WantedKind::Series => "series",
+        }
+    }
+}
+
+/// A monitored movie or series the PVR should auto-download and upgrade.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct WantedItem {
+    /// Stable id (`movie-{tmdb}` / `series-{tmdb}`).
+    #[serde(default)]
+    pub id: String,
+    pub kind: WantedKind,
+    pub tmdb_id: i64,
+    pub title: String,
+    pub year: Option<i32>,
+    #[serde(default)]
+    pub quality_profile: String,
+    #[serde(default)]
+    pub category: String,
+    #[serde(default = "default_true")]
+    pub monitored: bool,
+}
+
 /// Provider status surfaced to the UI (never exposes the raw key).
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProviderInfo {

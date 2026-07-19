@@ -1,13 +1,156 @@
-//! Wanted page. Monitored movies/series with quality upgrades in a later phase.
+//! Wanted page: search TMDb, add monitored movies/series (with a quality profile
+//! + category), and trigger the monitor on demand.
 
 use leptos::prelude::*;
+use leptos::task::spawn_local;
+
+use crate::api::{
+    add_wanted, list_quality_profiles, list_wanted, remove_wanted, run_monitor_now, tmdb_search,
+};
+use crate::components::dashboard_state;
+use crate::types::{MediaSearchResult, QualityProfile, WantedItem, WantedKind};
 
 #[component]
 pub fn WantedPage() -> impl IntoView {
+    let state = dashboard_state();
+    let wanted = RwSignal::new(Vec::<WantedItem>::new());
+    let profiles = RwSignal::new(Vec::<QualityProfile>::new());
+    let query = RwSignal::new(String::new());
+    let results = RwSignal::new(Vec::<MediaSearchResult>::new());
+    let profile = RwSignal::new(String::new());
+    let category = RwSignal::new(String::new());
+    let status = RwSignal::new(String::new());
+
+    let reload = move || {
+        spawn_local(async move {
+            if let Ok(w) = list_wanted().await {
+                wanted.set(w);
+            }
+            if let Ok(p) = list_quality_profiles().await {
+                profiles.set(p);
+            }
+        });
+    };
+    Effect::new(move |_| reload());
+
+    let search = move |_| {
+        let q = query.get().trim().to_string();
+        if q.is_empty() {
+            return;
+        }
+        status.set("Searching TMDb…".into());
+        results.set(Vec::new());
+        spawn_local(async move {
+            match tmdb_search(q).await {
+                Ok(r) => {
+                    status.set(format!("{} result(s).", r.len()));
+                    results.set(r);
+                }
+                Err(e) => status.set(e.to_string()),
+            }
+        });
+    };
+
+    let add = move |res: MediaSearchResult| {
+        let item = WantedItem {
+            id: String::new(),
+            kind: if res.is_tv {
+                WantedKind::Series
+            } else {
+                WantedKind::Movie
+            },
+            tmdb_id: res.tmdb_id,
+            title: res.title,
+            year: res.year,
+            quality_profile: profile.get(),
+            category: category.get(),
+            monitored: true,
+        };
+        spawn_local(async move {
+            match add_wanted(item).await {
+                Ok(()) => reload(),
+                Err(e) => status.set(e.to_string()),
+            }
+        });
+    };
+    let del = move |id: String| {
+        spawn_local(async move {
+            let _ = remove_wanted(id).await;
+            reload();
+        });
+    };
+    let search_now = move |_| {
+        status.set("Searching indexers for wanted items…".into());
+        spawn_local(async move {
+            match run_monitor_now().await {
+                Ok(n) => status.set(format!("Monitor run — {n} new grab(s).")),
+                Err(e) => status.set(e.to_string()),
+            }
+        });
+    };
+
     view! {
-        <div class="page-stub panel">
-            <h2 class="page-title">"WANTED"</h2>
-            <p class="page-stub-note">"Monitored movies and TV shows arrive in a later phase."</p>
+        <div class="settings-page">
+            <section class="panel settings-section">
+                <h2 class="page-title">"ADD WANTED"</h2>
+                <p class="settings-hint">
+                    "Search TMDb, pick a quality profile + category, then add a movie or series. The monitor checks indexers a few times a day for missing episodes and quality upgrades (needs a TMDb key for episode air dates)."
+                </p>
+                <div class="cat-form">
+                    <input class="text-input grow" r#type="text" placeholder="search movies & TV…"
+                        prop:value=move || query.get() on:input=move |e| query.set(event_target_value(&e))/>
+                    <select class="sort-select" prop:value=move || profile.get()
+                        on:change=move |e| profile.set(event_target_value(&e))>
+                        <option value="">"accept all"</option>
+                        {move || profiles.get().iter()
+                            .map(|p| view! { <option value=p.id.clone()>{p.name.clone()}</option> })
+                            .collect_view()}
+                    </select>
+                    <select class="sort-select" prop:value=move || category.get()
+                        on:change=move |e| category.set(event_target_value(&e))>
+                        <option value="">"no category"</option>
+                        {move || state.categories.get().iter()
+                            .map(|c| view! { <option value=c.slug.clone()>{c.name.clone()}</option> })
+                            .collect_view()}
+                    </select>
+                    <button class="btn btn-primary" on:click=search>"Search"</button>
+                </div>
+                <p class="add-status">{move || status.get()}</p>
+                <div class="cat-list">
+                    <For each=move || results.get() key=|r| r.tmdb_id let:r>
+                        <div class="cat-row">
+                            <span class=if r.is_tv { "cat-kind k-tv" } else { "cat-kind k-movie" }>
+                                {if r.is_tv { "series" } else { "movie" }}
+                            </span>
+                            <span class="cat-name">{r.title.clone()}</span>
+                            <span class="rel-meta">{r.year.map(|y| y.to_string()).unwrap_or_default()}</span>
+                            <button class="btn btn-ghost btn-sm"
+                                on:click={let res = r.clone(); move |_| add(res.clone())}>"+ Want"</button>
+                        </div>
+                    </For>
+                </div>
+            </section>
+
+            <section class="panel settings-section">
+                <div class="files-head">
+                    <span class="detail-card-title">"MONITORED"</span>
+                    <button class="btn btn-primary btn-sm" on:click=search_now>"Search now"</button>
+                </div>
+                <div class="cat-list">
+                    <For each=move || wanted.get() key=|w| w.id.clone() let:w>
+                        <div class="cat-row">
+                            <span class=if matches!(w.kind, WantedKind::Series) { "cat-kind k-tv" } else { "cat-kind k-movie" }>
+                                {w.kind.label()}
+                            </span>
+                            <span class="cat-name">{w.title.clone()}</span>
+                            <span class="rel-meta">{w.year.map(|y| y.to_string()).unwrap_or_default()}</span>
+                            <button class="icon-btn danger" title="Remove"
+                                on:click={let id = w.id.clone(); move |_| del(id.clone())}>"🗑"</button>
+                        </div>
+                    </For>
+                    {move || wanted.get().is_empty().then(|| view! { <p class="tree-empty">"— nothing monitored yet —"</p> })}
+                </div>
+            </section>
         </div>
     }
 }

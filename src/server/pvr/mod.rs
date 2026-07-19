@@ -21,7 +21,7 @@ use crate::server::config::AppConfig;
 use crate::server::engine::Engine;
 use crate::types::{
     Category, GrabHistoryEntry, Indexer, Library, MediaSearchResult, ProviderInfo, QualityProfile,
-    Release, RssFeed,
+    Release, RssFeed, WantedItem, WantedKind,
 };
 use meta::MetadataClient;
 use store::PvrStore;
@@ -31,6 +31,48 @@ const TMDB_KEY: &str = "tmdb_api_key";
 const FEED_POLL_INTERVAL: Duration = Duration::from_secs(900);
 /// How often the download tree is re-scanned into the library.
 const SCAN_INTERVAL: Duration = Duration::from_secs(3600);
+/// How often monitored wanted items are checked (≈4×/day).
+const MONITOR_INTERVAL: Duration = Duration::from_secs(6 * 3600);
+
+/// Does a parsed release title plausibly match the wanted title?
+fn title_matches(a: &str, b: &str) -> bool {
+    let na = crate::types::norm_title(a);
+    let nb = crate::types::norm_title(b);
+    if na.is_empty() || nb.is_empty() {
+        return false;
+    }
+    na == nb || na.contains(&nb) || nb.contains(&na) || strsim::jaro_winkler(&na, &nb) > 0.9
+}
+
+/// Pick the highest-scoring acceptable release that matches the wanted title
+/// (and, for episodes, the exact season/episode).
+fn best_acceptable(
+    releases: &[Release],
+    profile: Option<&QualityProfile>,
+    title: &str,
+    season: Option<i32>,
+    episode: Option<i32>,
+) -> Option<(Release, i64)> {
+    releases
+        .iter()
+        .filter_map(|r| {
+            let parsed = quality::parse_release(&r.title);
+            if !title_matches(&parsed.title, title) {
+                return None;
+            }
+            if let (Some(s), Some(e)) = (season, episode) {
+                if parsed.season != Some(s) || parsed.episode != Some(e) {
+                    return None;
+                }
+            }
+            let sc = match profile {
+                Some(p) => quality::score(&parsed, p)?,
+                None => r.seeders.unwrap_or(0) as i64,
+            };
+            Some((r.clone(), sc))
+        })
+        .max_by_key(|(_, sc)| *sc)
+}
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -61,6 +103,9 @@ impl Pvr {
 
         // Poll auto-download RSS feeds on a fixed interval (first tick fires soon
         // after startup; grab-history dedup prevents re-grabbing known items).
+        // Populate the library once at startup so the monitor knows what's on disk.
+        pvr.scan_library();
+
         let poller = pvr.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(FEED_POLL_INTERVAL);
@@ -73,14 +118,27 @@ impl Pvr {
         });
 
         // Re-scan the download tree into the library on a fixed interval
-        // (blocking walk runs on a blocking thread).
+        // (blocking walk runs on a blocking thread; startup scan already ran).
         let scanner = pvr.clone();
         tokio::spawn(async move {
             let mut interval = tokio::time::interval(SCAN_INTERVAL);
+            interval.tick().await;
             loop {
                 interval.tick().await;
                 let s = scanner.clone();
                 let _ = tokio::task::spawn_blocking(move || s.scan_library()).await;
+            }
+        });
+
+        // Check monitored wanted items for missing/upgradeable releases.
+        let monitor = pvr.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(MONITOR_INTERVAL);
+            loop {
+                interval.tick().await;
+                if let Err(e) = monitor.run_monitor().await {
+                    tracing::warn!("monitor error: {e}");
+                }
             }
         });
 
@@ -98,6 +156,112 @@ impl Pvr {
 
     pub fn library(&self) -> Library {
         self.store.get_library().unwrap_or_default()
+    }
+
+    // --- wanted / monitor --------------------------------------------------
+
+    pub fn list_wanted(&self) -> Result<Vec<WantedItem>> {
+        self.store.list_wanted()
+    }
+
+    pub fn add_wanted(&self, mut w: WantedItem) -> Result<()> {
+        w.title = w.title.trim().to_string();
+        if w.title.is_empty() {
+            bail!("title is required");
+        }
+        w.id = format!("{}-{}", w.kind.label(), w.tmdb_id);
+        self.store.upsert_wanted(&w)
+    }
+
+    pub fn remove_wanted(&self, id: &str) -> Result<()> {
+        self.store.delete_wanted(id)
+    }
+
+    /// Check every monitored wanted item, grabbing missing/upgradeable releases.
+    /// Returns the number of new grabs.
+    pub async fn run_monitor(&self) -> Result<usize> {
+        let wanted = self.store.list_wanted()?;
+        let profiles = self.store.list_quality_profiles()?;
+        let library = self.store.get_library().unwrap_or_default();
+        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        let key = self.tmdb_key();
+        let mut grabbed = 0usize;
+
+        for w in wanted.iter().filter(|w| w.monitored) {
+            let profile = profiles.iter().find(|p| p.id == w.quality_profile);
+            match w.kind {
+                WantedKind::Movie => {
+                    let id = format!("monitor:{}:movie", w.id);
+                    if self.consider_grab(&id, w, &library, profile, None, None).await {
+                        grabbed += 1;
+                    }
+                }
+                WantedKind::Series => {
+                    let Some(key) = key.as_deref() else { continue };
+                    let episodes = self
+                        .meta
+                        .series_aired_episodes(key, w.tmdb_id, &today)
+                        .await
+                        .unwrap_or_default();
+                    for ep in episodes {
+                        let id = format!("monitor:{}:s{}e{}", w.id, ep.season, ep.episode);
+                        if self
+                            .consider_grab(&id, w, &library, profile, Some(ep.season), Some(ep.episode))
+                            .await
+                        {
+                            grabbed += 1;
+                        }
+                    }
+                }
+            }
+        }
+        Ok(grabbed)
+    }
+
+    /// Decide whether to grab (or upgrade) a specific movie/episode.
+    async fn consider_grab(
+        &self,
+        dedup_id: &str,
+        w: &WantedItem,
+        library: &Library,
+        profile: Option<&QualityProfile>,
+        season: Option<i32>,
+        episode: Option<i32>,
+    ) -> bool {
+        let in_lib = match (season, episode) {
+            (Some(s), Some(e)) => library.has_episode(&w.title, s, e),
+            _ => library.has_movie(&w.title, w.year),
+        };
+        let cur = self.store.history_best_score(dedup_id).ok().flatten();
+        // On disk already and never grabbed by us → leave it alone.
+        if in_lib && cur.is_none() {
+            return false;
+        }
+
+        let query = match (season, episode) {
+            (Some(s), Some(e)) => format!("{} S{s:02}E{e:02}", w.title),
+            _ => match w.year {
+                Some(y) => format!("{} {}", w.title, y),
+                None => w.title.clone(),
+            },
+        };
+        let releases = self.search_releases(&query).await.unwrap_or_default();
+        let Some((rel, sc)) = best_acceptable(&releases, profile, &w.title, season, episode) else {
+            return false;
+        };
+
+        let should = match cur {
+            None => true,
+            Some(c) => {
+                profile.map(|p| p.upgrade_allowed).unwrap_or(false)
+                    && c < profile.map(quality::cutoff_score).unwrap_or(i64::MAX)
+                    && sc > c
+            }
+        };
+        should
+            && self
+                .grab_release(dedup_id, &rel.url, &rel.title, &w.category, "monitor", sc)
+                .is_ok()
     }
 
     // --- categories --------------------------------------------------------
@@ -278,9 +442,11 @@ impl Pvr {
         self.config.download_dir.to_string_lossy().into_owned()
     }
 
-    /// Start a download and record it in grab history.
+    /// Start a download and record it in grab history under dedup key `id`
+    /// (release URL for feeds/search; an episode/movie key for the monitor).
     pub fn grab_release(
         &self,
+        id: &str,
         url: &str,
         title: &str,
         category: &str,
@@ -290,7 +456,7 @@ impl Pvr {
         let path = self.category_path(category);
         self.engine.spawn_add_url(url.to_string(), path, false, None)?;
         self.store.record_grab(&GrabHistoryEntry {
-            id: url.to_string(),
+            id: id.to_string(),
             title: title.to_string(),
             url: url.to_string(),
             category: category.to_string(),
@@ -331,7 +497,7 @@ impl Pvr {
                     },
                     None => 0,
                 };
-                match self.grab_release(&item.url, &item.title, &f.category, &f.name, sc) {
+                match self.grab_release(&item.url, &item.url, &item.title, &f.category, &f.name, sc) {
                     Ok(()) => grabbed += 1,
                     Err(e) => tracing::warn!("grab failed: {e}"),
                 }
