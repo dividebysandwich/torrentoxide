@@ -17,20 +17,137 @@ fn flash(sig: RwSignal<bool>, ms: u64) {
     set_timeout(move || sig.set(false), Duration::from_millis(ms));
 }
 
+/// Coarse status buckets for the list filter (single-select chips).
+#[derive(Clone, Copy, PartialEq)]
+enum StatusFilter {
+    All,
+    Downloading,
+    Seeding,
+    Paused,
+    Error,
+}
+
+impl StatusFilter {
+    const ALL: [StatusFilter; 5] = [
+        Self::All,
+        Self::Downloading,
+        Self::Seeding,
+        Self::Paused,
+        Self::Error,
+    ];
+
+    fn matches(&self, s: TorrentState) -> bool {
+        match self {
+            Self::All => true,
+            Self::Downloading => matches!(s, TorrentState::Live | TorrentState::Initializing),
+            Self::Seeding => matches!(s, TorrentState::Finished),
+            Self::Paused => matches!(s, TorrentState::Paused),
+            Self::Error => matches!(s, TorrentState::Error),
+        }
+    }
+
+    fn label(&self) -> &'static str {
+        match self {
+            Self::All => "ALL",
+            Self::Downloading => "DOWNLOADING",
+            Self::Seeding => "SEEDING",
+            Self::Paused => "PAUSED",
+            Self::Error => "ERROR",
+        }
+    }
+}
+
+/// Sort keys for the list.
+#[derive(Clone, Copy, PartialEq)]
+enum SortKey {
+    Added,
+    Name,
+    Size,
+    Progress,
+    Down,
+    Up,
+    Ratio,
+}
+
+impl SortKey {
+    const ALL: [SortKey; 7] = [
+        Self::Added,
+        Self::Name,
+        Self::Size,
+        Self::Progress,
+        Self::Down,
+        Self::Up,
+        Self::Ratio,
+    ];
+
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Added => "ADDED",
+            Self::Name => "NAME",
+            Self::Size => "SIZE",
+            Self::Progress => "PROGRESS",
+            Self::Down => "DOWN",
+            Self::Up => "UP",
+            Self::Ratio => "RATIO",
+        }
+    }
+}
+
+fn ratio(t: &TorrentView) -> f64 {
+    if t.downloaded_bytes > 0 {
+        t.uploaded_bytes as f64 / t.downloaded_bytes as f64
+    } else {
+        0.0
+    }
+}
+
 #[component]
 pub fn TorrentList() -> impl IntoView {
     let state = dashboard_state();
 
-    let ids = move || {
-        state
-            .snapshot
-            .get()
+    // Client-side list controls (low-friction filter + sort).
+    let query = RwSignal::new(String::new());
+    let status = RwSignal::new(StatusFilter::All);
+    let sort_key = RwSignal::new(SortKey::Added);
+    let sort_desc = RwSignal::new(false);
+
+    // Filter + sort once per change; the keyed <For> below preserves rows on reorder.
+    let filtered: Memo<Vec<TorrentView>> = Memo::new(move |_| {
+        let snap = state.snapshot.get();
+        let q = query.get().trim().to_lowercase();
+        let sf = status.get();
+        let key = sort_key.get();
+        let desc = sort_desc.get();
+
+        let mut v: Vec<TorrentView> = snap
             .torrents
-            .iter()
-            .map(|t| t.id)
-            .collect::<Vec<_>>()
-    };
+            .into_iter()
+            .filter(|t| (q.is_empty() || t.name.to_lowercase().contains(&q)) && sf.matches(t.state))
+            .collect();
+
+        v.sort_by(|a, b| {
+            use std::cmp::Ordering::Equal;
+            let ord = match key {
+                SortKey::Added => a.id.cmp(&b.id),
+                SortKey::Name => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+                SortKey::Size => a.total_bytes.cmp(&b.total_bytes),
+                SortKey::Progress => a.progress.partial_cmp(&b.progress).unwrap_or(Equal),
+                SortKey::Down => a.down_bps.partial_cmp(&b.down_bps).unwrap_or(Equal),
+                SortKey::Up => a.up_bps.partial_cmp(&b.up_bps).unwrap_or(Equal),
+                SortKey::Ratio => ratio(a).partial_cmp(&ratio(b)).unwrap_or(Equal),
+            };
+            if desc {
+                ord.reverse()
+            } else {
+                ord
+            }
+        });
+        v
+    });
+
+    let ids = move || filtered.get().iter().map(|t| t.id).collect::<Vec<_>>();
     let is_empty = move || state.snapshot.get().torrents.is_empty();
+    let no_matches = move || !is_empty() && filtered.get().is_empty();
 
     let render_row = move |id: u64| {
         // A synthetic (pending) id never becomes a real id, so deciding once at
@@ -50,10 +167,69 @@ pub fn TorrentList() -> impl IntoView {
         }
     };
 
+    // Status filter chips (single-select).
+    let chips = StatusFilter::ALL
+        .iter()
+        .map(|&f| {
+            view! {
+                <button
+                    class="filter-chip"
+                    class:active=move || status.get() == f
+                    on:click=move |_| status.set(f)
+                >
+                    {f.label()}
+                </button>
+            }
+        })
+        .collect::<Vec<_>>();
+
+    // Sort-key options.
+    let sort_opts = SortKey::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, &k)| view! { <option value=i.to_string()>{k.label()}</option> })
+        .collect::<Vec<_>>();
+    let sort_index = move || SortKey::ALL.iter().position(|k| *k == sort_key.get()).unwrap_or(0);
+
     view! {
         <div class="torrent-list">
             <Show when=move || !is_empty() fallback=EmptyState>
-                <For each=ids key=|id| *id children=render_row/>
+                <div class="list-toolbar">
+                    <input
+                        class="text-input grow"
+                        r#type="text"
+                        placeholder="filter by name…"
+                        prop:value=move || query.get()
+                        on:input=move |e| query.set(event_target_value(&e))
+                    />
+                    <div class="filter-chips">{chips.clone()}</div>
+                    <div class="sort-controls">
+                        <span class="sort-label">"SORT"</span>
+                        <select
+                            class="sort-select"
+                            prop:value=move || sort_index().to_string()
+                            on:change=move |e| {
+                                let i = event_target_value(&e).parse::<usize>().unwrap_or(0);
+                                sort_key.set(SortKey::ALL[i.min(SortKey::ALL.len() - 1)]);
+                            }
+                        >
+                            {sort_opts.clone()}
+                        </select>
+                        <button
+                            class="sort-dir"
+                            title=move || if sort_desc.get() { "descending" } else { "ascending" }
+                            on:click=move |_| sort_desc.update(|d| *d = !*d)
+                        >
+                            {move || if sort_desc.get() { "▼" } else { "▲" }}
+                        </button>
+                    </div>
+                </div>
+                <Show
+                    when=move || !no_matches()
+                    fallback=|| view! { <p class="list-nomatch">"— no torrents match the filter —"</p> }
+                >
+                    <For each=ids key=|id| *id children=render_row/>
+                </Show>
             </Show>
         </div>
     }

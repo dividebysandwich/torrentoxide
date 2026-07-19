@@ -742,6 +742,93 @@ code {
   flex-direction: column;
   gap: 0.85rem;
 }
+
+// ---- list filter / sort toolbar ----------------------------------------
+
+.list-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+.filter-chips {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+.filter-chip {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  padding: 0.3rem 0.6rem;
+  border: 1px solid rgba(36, 227, 255, 0.28);
+  background: rgba(8, 12, 22, 0.8);
+  color: var(--ink-dim);
+  cursor: pointer;
+  transition: all 0.12s ease;
+  @include cut(5px);
+  &:hover {
+    color: var(--cyan);
+    border-color: var(--cyan);
+  }
+  &.active {
+    color: var(--bg-0);
+    background: linear-gradient(120deg, var(--cyan), #12a8d8);
+    border-color: var(--cyan);
+    box-shadow: 0 0 12px -3px var(--glow-cyan);
+  }
+}
+.sort-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.sort-label {
+  @include tag-label;
+}
+.sort-select {
+  padding: 0.35rem 0.5rem;
+  border: 1px solid rgba(36, 227, 255, 0.3);
+  background: rgba(4, 8, 14, 0.85);
+  color: var(--ink);
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  @include cut(6px);
+  cursor: pointer;
+  &:focus {
+    outline: none;
+    border-color: var(--cyan);
+    box-shadow: 0 0 0 1px var(--cyan);
+  }
+}
+.sort-dir {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(36, 227, 255, 0.35);
+  background: rgba(8, 12, 22, 0.8);
+  color: var(--cyan);
+  cursor: pointer;
+  @include cut(5px);
+  &:hover {
+    box-shadow: 0 0 10px -2px var(--glow-cyan);
+    border-color: var(--cyan);
+  }
+}
+.list-nomatch {
+  text-align: center;
+  color: var(--ink-dim);
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  padding: 1.5rem;
+}
 .torrent-row {
   @include framed(12px, 1.5px, var(--panel), rgba(255, 43, 77, 0.4), rgba(255, 43, 77, 0.22));
   display: flex;
