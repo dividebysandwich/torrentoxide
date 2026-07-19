@@ -3,40 +3,73 @@
 //! handles to the engine + config so it can create directories and (later)
 //! trigger downloads.
 
+pub mod feed;
+pub mod indexer;
 pub mod meta;
 pub mod quality;
 pub mod store;
+pub mod xmlparse;
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{bail, Result};
 
 use crate::server::config::AppConfig;
 use crate::server::engine::Engine;
-use crate::types::{Category, MediaSearchResult, ProviderInfo, QualityProfile};
+use crate::types::{
+    Category, GrabHistoryEntry, Indexer, MediaSearchResult, ProviderInfo, QualityProfile, Release,
+    RssFeed,
+};
 use meta::MetadataClient;
 use store::PvrStore;
 
 const TMDB_KEY: &str = "tmdb_api_key";
+/// How often enabled auto-download RSS feeds are polled.
+const FEED_POLL_INTERVAL: Duration = Duration::from_secs(900);
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
 
 pub struct Pvr {
     store: Arc<PvrStore>,
     engine: Arc<Engine>,
     config: Arc<AppConfig>,
     meta: MetadataClient,
+    http: reqwest::Client,
 }
 
 impl Pvr {
     pub fn new(config: Arc<AppConfig>, engine: Arc<Engine>) -> Result<Arc<Self>> {
         let db_path = config.persistence_dir.join("pvr.redb");
         let store = Arc::new(PvrStore::open(&db_path)?);
-        Ok(Arc::new(Self {
+        let pvr = Arc::new(Self {
             store,
             engine,
             config,
             meta: MetadataClient::new(),
-        }))
+            http: reqwest::Client::new(),
+        });
+
+        // Poll auto-download RSS feeds on a fixed interval (first tick fires soon
+        // after startup; grab-history dedup prevents re-grabbing known items).
+        let poller = pvr.clone();
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(FEED_POLL_INTERVAL);
+            loop {
+                interval.tick().await;
+                if let Err(e) = poller.poll_feeds().await {
+                    tracing::warn!("feed poll error: {e}");
+                }
+            }
+        });
+
+        Ok(pvr)
     }
 
     // --- categories --------------------------------------------------------
@@ -130,6 +163,153 @@ impl Pvr {
             .tmdb_key()
             .ok_or_else(|| anyhow::anyhow!("no TMDb API key set"))?;
         self.meta.search(&key, query).await
+    }
+
+    // --- indexers ----------------------------------------------------------
+
+    pub fn list_indexers(&self) -> Result<Vec<Indexer>> {
+        self.store.list_indexers()
+    }
+
+    pub fn upsert_indexer(&self, mut i: Indexer) -> Result<()> {
+        i.name = i.name.trim().to_string();
+        if i.name.is_empty() {
+            bail!("indexer name is required");
+        }
+        if i.torznab_url.trim().is_empty() {
+            bail!("Torznab URL is required");
+        }
+        i.id = slugify(&i.name);
+        if i.id.is_empty() {
+            bail!("indexer name must contain letters or digits");
+        }
+        self.store.upsert_indexer(&i)
+    }
+
+    pub fn delete_indexer(&self, id: &str) -> Result<()> {
+        self.store.delete_indexer(id)
+    }
+
+    pub async fn test_indexer(&self, indexer: &Indexer) -> Result<()> {
+        indexer::test(&self.http, indexer).await
+    }
+
+    /// Search all enabled indexers, sorted by seeders (desc).
+    pub async fn search_releases(&self, query: &str) -> Result<Vec<Release>> {
+        let indexers = self.store.list_indexers()?;
+        let mut all = Vec::new();
+        for ix in indexers.iter().filter(|i| i.enabled) {
+            match indexer::search(&self.http, ix, query).await {
+                Ok(mut r) => all.append(&mut r),
+                Err(e) => tracing::warn!("indexer {} search failed: {e}", ix.name),
+            }
+        }
+        all.sort_by(|a, b| b.seeders.unwrap_or(0).cmp(&a.seeders.unwrap_or(0)));
+        Ok(all)
+    }
+
+    // --- rss feeds ---------------------------------------------------------
+
+    pub fn list_feeds(&self) -> Result<Vec<RssFeed>> {
+        self.store.list_feeds()
+    }
+
+    pub fn upsert_feed(&self, mut f: RssFeed) -> Result<()> {
+        f.name = f.name.trim().to_string();
+        if f.name.is_empty() {
+            bail!("feed name is required");
+        }
+        if f.url.trim().is_empty() {
+            bail!("feed URL is required");
+        }
+        f.id = slugify(&f.name);
+        if f.id.is_empty() {
+            bail!("feed name must contain letters or digits");
+        }
+        self.store.upsert_feed(&f)
+    }
+
+    pub fn delete_feed(&self, id: &str) -> Result<()> {
+        self.store.delete_feed(id)
+    }
+
+    // --- grabbing / history ------------------------------------------------
+
+    /// Resolve a category slug to an absolute download path (default dir if unset).
+    pub fn category_path(&self, slug: &str) -> String {
+        if slug.trim().is_empty() {
+            return self.config.download_dir.to_string_lossy().into_owned();
+        }
+        if let Ok(cats) = self.store.list_categories() {
+            if let Some(c) = cats.iter().find(|c| c.slug == slug) {
+                if let Ok(dir) = self.category_dir(&c.subdir) {
+                    return dir.to_string_lossy().into_owned();
+                }
+            }
+        }
+        self.config.download_dir.to_string_lossy().into_owned()
+    }
+
+    /// Start a download and record it in grab history.
+    pub fn grab_release(
+        &self,
+        url: &str,
+        title: &str,
+        category: &str,
+        source: &str,
+        score: i64,
+    ) -> Result<()> {
+        let path = self.category_path(category);
+        self.engine.spawn_add_url(url.to_string(), path, false, None)?;
+        self.store.record_grab(&GrabHistoryEntry {
+            id: url.to_string(),
+            title: title.to_string(),
+            url: url.to_string(),
+            category: category.to_string(),
+            source: source.to_string(),
+            score,
+            grabbed_at: now_secs(),
+        })
+    }
+
+    pub fn list_grab_history(&self) -> Result<Vec<GrabHistoryEntry>> {
+        self.store.list_grab_history()
+    }
+
+    /// Poll every enabled auto-download feed, grabbing acceptable new items.
+    /// Returns the number of new grabs.
+    pub async fn poll_feeds(&self) -> Result<usize> {
+        let feeds = self.store.list_feeds()?;
+        let profiles = self.store.list_quality_profiles()?;
+        let mut grabbed = 0usize;
+
+        for f in feeds.iter().filter(|f| f.enabled && f.auto_download) {
+            let items = match feed::fetch(&self.http, &f.url).await {
+                Ok(i) => i,
+                Err(e) => {
+                    tracing::warn!("feed {} fetch failed: {e}", f.name);
+                    continue;
+                }
+            };
+            let profile = profiles.iter().find(|p| p.id == f.quality_profile);
+            for item in items {
+                if self.store.history_contains(&item.url).unwrap_or(false) {
+                    continue;
+                }
+                let sc = match profile {
+                    Some(prof) => match quality::score(&quality::parse_release(&item.title), prof) {
+                        Some(s) => s,
+                        None => continue, // fails the profile
+                    },
+                    None => 0,
+                };
+                match self.grab_release(&item.url, &item.title, &f.category, &f.name, sc) {
+                    Ok(()) => grabbed += 1,
+                    Err(e) => tracing::warn!("grab failed: {e}"),
+                }
+            }
+        }
+        Ok(grabbed)
     }
 
     /// Resolve a category's sub-directory to an absolute path confined to the

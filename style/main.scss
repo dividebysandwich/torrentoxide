@@ -444,6 +444,22 @@ code {
   color: var(--ink-dim);
   white-space: nowrap;
 }
+.rel-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 0.85rem;
+}
+.rel-meta {
+  flex: 0 0 auto;
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+}
 
 .content {
   display: flex;

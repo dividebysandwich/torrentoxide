@@ -4,8 +4,9 @@
 use leptos::prelude::*;
 
 use crate::types::{
-    AddRequest, Category, Defaults, DirListing, FileEntry, MediaSearchResult, ProviderInfo,
-    QualityProfile, Settings, TorrentDetail, TorrentView,
+    AddRequest, Category, Defaults, DirListing, FileEntry, GrabHistoryEntry, Indexer,
+    MediaSearchResult, ProviderInfo, QualityProfile, Release, RssFeed, Settings, TorrentDetail,
+    TorrentView,
 };
 
 #[server]
@@ -245,6 +246,129 @@ pub async fn tmdb_search(query: String) -> Result<Vec<MediaSearchResult>, Server
         .pvr
         .tmdb_search(&query)
         .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+// --- indexers ---------------------------------------------------------------
+
+#[server]
+pub async fn list_indexers() -> Result<Vec<Indexer>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .list_indexers()
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn upsert_indexer(indexer: Indexer) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .upsert_indexer(indexer)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn delete_indexer(id: String) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .delete_indexer(&id)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn test_indexer(indexer: Indexer) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .test_indexer(&indexer)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn search_releases(query: String) -> Result<Vec<Release>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .search_releases(&query)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+// --- rss feeds --------------------------------------------------------------
+
+#[server]
+pub async fn list_feeds() -> Result<Vec<RssFeed>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .list_feeds()
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn upsert_feed(feed: RssFeed) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .upsert_feed(feed)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn delete_feed(id: String) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .delete_feed(&id)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn poll_feeds_now() -> Result<usize, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .poll_feeds()
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+// --- grabbing / history -----------------------------------------------------
+
+#[server]
+pub async fn grab_release(
+    url: String,
+    title: String,
+    category: String,
+) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .grab_release(&url, &title, &category, "search", 0)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn list_grab_history() -> Result<Vec<GrabHistoryEntry>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .list_grab_history()
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 

@@ -228,6 +228,72 @@ pub struct MediaSearchResult {
     pub is_tv: bool,
 }
 
+/// A configured Torznab indexer (e.g. a Jackett indexer endpoint).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Indexer {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    /// Torznab base URL, e.g.
+    /// `http://127.0.0.1:9117/api/v2.0/indexers/all/results/torznab/`.
+    pub torznab_url: String,
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// A configured RSS feed for passive auto-download into a category.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RssFeed {
+    #[serde(default)]
+    pub id: String,
+    pub name: String,
+    pub url: String,
+    /// Category slug that grabs land in (empty = default download dir).
+    #[serde(default)]
+    pub category: String,
+    /// Quality profile id used to filter/rank items (empty = accept everything).
+    #[serde(default)]
+    pub quality_profile: String,
+    #[serde(default)]
+    pub auto_download: bool,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// A candidate release from an indexer search or an RSS feed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Release {
+    pub title: String,
+    /// Download link (magnet or `.torrent` URL) handed to the engine.
+    pub url: String,
+    #[serde(default)]
+    pub size: u64,
+    #[serde(default)]
+    pub seeders: Option<u32>,
+    #[serde(default)]
+    pub indexer: String,
+}
+
+/// One grab recorded in history (for dedup, audit and upgrade tracking).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct GrabHistoryEntry {
+    /// Dedup key (release download url).
+    pub id: String,
+    pub title: String,
+    pub url: String,
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub source: String,
+    #[serde(default)]
+    pub score: i64,
+    /// Unix seconds when grabbed.
+    #[serde(default)]
+    pub grabbed_at: u64,
+}
+
 /// Provider status surfaced to the UI (never exposes the raw key).
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct ProviderInfo {

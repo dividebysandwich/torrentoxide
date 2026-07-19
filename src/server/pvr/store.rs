@@ -7,11 +7,14 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use redb::{Database, ReadableTable, TableDefinition};
 
-use crate::types::{Category, QualityProfile};
+use crate::types::{Category, GrabHistoryEntry, Indexer, QualityProfile, RssFeed};
 
 const CATEGORIES: TableDefinition<&str, &[u8]> = TableDefinition::new("categories");
 const QUALITY_PROFILES: TableDefinition<&str, &[u8]> = TableDefinition::new("quality_profiles");
 const CONFIG: TableDefinition<&str, &[u8]> = TableDefinition::new("config");
+const INDEXERS: TableDefinition<&str, &[u8]> = TableDefinition::new("indexers");
+const FEEDS: TableDefinition<&str, &[u8]> = TableDefinition::new("feeds");
+const GRAB_HISTORY: TableDefinition<&str, &[u8]> = TableDefinition::new("grab_history");
 
 pub struct PvrStore {
     db: Database,
@@ -28,6 +31,9 @@ impl PvrStore {
             let _ = txn.open_table(CATEGORIES)?;
             let _ = txn.open_table(QUALITY_PROFILES)?;
             let _ = txn.open_table(CONFIG)?;
+            let _ = txn.open_table(INDEXERS)?;
+            let _ = txn.open_table(FEEDS)?;
+            let _ = txn.open_table(GRAB_HISTORY)?;
         }
         txn.commit()?;
         Ok(Self { db })
@@ -123,5 +129,112 @@ impl PvrStore {
         }
         txn.commit()?;
         Ok(())
+    }
+
+    // --- indexers ----------------------------------------------------------
+
+    pub fn list_indexers(&self) -> Result<Vec<Indexer>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(INDEXERS)?;
+        let mut out = Vec::new();
+        for entry in table.iter()? {
+            let (_k, v) = entry?;
+            if let Ok(i) = serde_json::from_slice::<Indexer>(v.value()) {
+                out.push(i);
+            }
+        }
+        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok(out)
+    }
+
+    pub fn upsert_indexer(&self, i: &Indexer) -> Result<()> {
+        let bytes = serde_json::to_vec(i)?;
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(INDEXERS)?;
+            table.insert(i.id.as_str(), bytes.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_indexer(&self, id: &str) -> Result<()> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(INDEXERS)?;
+            table.remove(id)?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    // --- rss feeds ---------------------------------------------------------
+
+    pub fn list_feeds(&self) -> Result<Vec<RssFeed>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(FEEDS)?;
+        let mut out = Vec::new();
+        for entry in table.iter()? {
+            let (_k, v) = entry?;
+            if let Ok(f) = serde_json::from_slice::<RssFeed>(v.value()) {
+                out.push(f);
+            }
+        }
+        out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok(out)
+    }
+
+    pub fn upsert_feed(&self, f: &RssFeed) -> Result<()> {
+        let bytes = serde_json::to_vec(f)?;
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(FEEDS)?;
+            table.insert(f.id.as_str(), bytes.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    pub fn delete_feed(&self, id: &str) -> Result<()> {
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(FEEDS)?;
+            table.remove(id)?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    // --- grab history ------------------------------------------------------
+
+    pub fn history_contains(&self, id: &str) -> Result<bool> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(GRAB_HISTORY)?;
+        Ok(table.get(id)?.is_some())
+    }
+
+    pub fn record_grab(&self, e: &GrabHistoryEntry) -> Result<()> {
+        let bytes = serde_json::to_vec(e)?;
+        let txn = self.db.begin_write()?;
+        {
+            let mut table = txn.open_table(GRAB_HISTORY)?;
+            table.insert(e.id.as_str(), bytes.as_slice())?;
+        }
+        txn.commit()?;
+        Ok(())
+    }
+
+    pub fn list_grab_history(&self) -> Result<Vec<GrabHistoryEntry>> {
+        let txn = self.db.begin_read()?;
+        let table = txn.open_table(GRAB_HISTORY)?;
+        let mut out = Vec::new();
+        for entry in table.iter()? {
+            let (_k, v) = entry?;
+            if let Ok(e) = serde_json::from_slice::<GrabHistoryEntry>(v.value()) {
+                out.push(e);
+            }
+        }
+        out.sort_by(|a, b| b.grabbed_at.cmp(&a.grabbed_at));
+        Ok(out)
     }
 }
