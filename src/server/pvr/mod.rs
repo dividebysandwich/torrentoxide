@@ -149,7 +149,8 @@ impl Pvr {
 
     /// Walk the download tree, rebuild the library snapshot and persist it.
     pub fn scan_library(&self) -> Library {
-        let lib = scan::scan(&self.config.download_dir, now_secs());
+        let cats = self.store.list_categories().unwrap_or_default();
+        let lib = scan::scan(&self.config.download_dir, now_secs(), &cats);
         let _ = self.store.set_library(&lib);
         lib
     }
