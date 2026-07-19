@@ -5,7 +5,7 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use redb::{Database, ReadableTable, TableDefinition};
+use redb::{Database, ReadableDatabase, ReadableTable, TableDefinition};
 
 use crate::types::{
     Category, GrabHistoryEntry, Indexer, Library, QualityProfile, RssFeed, WantedItem,

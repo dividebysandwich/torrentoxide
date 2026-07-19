@@ -81,7 +81,11 @@ pub fn parse_items(xml: &str) -> Vec<Release> {
             }
             Ok(Event::Text(e)) => {
                 if let (Some(item), Some(f)) = (cur.as_mut(), field) {
-                    let txt = e.unescape().unwrap_or_default().trim().to_string();
+                    let txt = e
+                        .xml_content(quick_xml::XmlVersion::Implicit1_0)
+                        .unwrap_or_default()
+                        .trim()
+                        .to_string();
                     apply_text(item, f, txt);
                 }
                 field = None;
@@ -129,7 +133,10 @@ fn apply_text(item: &mut Item, f: Field, txt: String) {
 fn read_enclosure(e: &BytesStart, item: &mut Item) {
     for a in e.attributes().flatten() {
         let key = local_name(a.key.as_ref());
-        let val = a.unescape_value().unwrap_or_default().to_string();
+        let val = a
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+            .unwrap_or_default()
+            .to_string();
         match key.as_str() {
             "url" => {
                 if val.starts_with("magnet:") {
@@ -149,7 +156,10 @@ fn read_torznab_attr(e: &BytesStart, item: &mut Item) {
     let mut value = String::new();
     for a in e.attributes().flatten() {
         let key = local_name(a.key.as_ref());
-        let val = a.unescape_value().unwrap_or_default().to_string();
+        let val = a
+            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+            .unwrap_or_default()
+            .to_string();
         match key.as_str() {
             "name" => name = val,
             "value" => value = val,
