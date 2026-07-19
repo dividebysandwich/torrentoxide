@@ -20,8 +20,8 @@ use anyhow::{bail, Result};
 use crate::server::config::AppConfig;
 use crate::server::engine::Engine;
 use crate::types::{
-    Category, GrabHistoryEntry, Indexer, Library, MediaSearchResult, ProviderInfo, QualityProfile,
-    Release, RssFeed, WantedItem, WantedKind,
+    CalendarEntry, Category, GrabHistoryEntry, Indexer, Library, MediaSearchResult, ProviderInfo,
+    QualityProfile, Release, RssFeed, WantedItem, WantedKind,
 };
 use meta::MetadataClient;
 use store::PvrStore;
@@ -176,6 +176,25 @@ impl Pvr {
 
     pub fn remove_wanted(&self, id: &str) -> Result<()> {
         self.store.delete_wanted(id)
+    }
+
+    /// Upcoming/recent episode air dates for all monitored series (release calendar).
+    pub async fn get_calendar(&self) -> Result<Vec<CalendarEntry>> {
+        let key = self
+            .tmdb_key()
+            .ok_or_else(|| anyhow::anyhow!("no TMDb API key set"))?;
+        let wanted = self.store.list_wanted()?;
+        let mut out = Vec::new();
+        for w in wanted
+            .iter()
+            .filter(|w| w.monitored && matches!(w.kind, WantedKind::Series))
+        {
+            if let Ok(mut eps) = self.meta.upcoming_episodes(&key, w.tmdb_id, &w.title).await {
+                out.append(&mut eps);
+            }
+        }
+        out.sort_by(|a, b| a.air_date.cmp(&b.air_date).then_with(|| a.title.cmp(&b.title)));
+        Ok(out)
     }
 
     /// Check every monitored wanted item, grabbing missing/upgradeable releases.

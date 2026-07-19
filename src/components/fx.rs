@@ -64,6 +64,22 @@ pub fn now_hms() -> String {
     "00:00:00".to_string()
 }
 
+/// Today's date as `(year, month 1-12, day)` — browser clock.
+#[cfg(feature = "hydrate")]
+pub fn today_ymd() -> (i32, u32, u32) {
+    let d = js_sys::Date::new_0();
+    (
+        d.get_full_year() as i32,
+        d.get_month() as u32 + 1,
+        d.get_date() as u32,
+    )
+}
+
+#[cfg(not(feature = "hydrate"))]
+pub fn today_ymd() -> (i32, u32, u32) {
+    (1970, 1, 1)
+}
+
 /// Play a short square-wave "chirp" for UI feedback (browser only).
 #[cfg(feature = "hydrate")]
 pub fn chirp(freq: f64) {

@@ -467,6 +467,86 @@ code {
   margin: 0.6rem 0 0.9rem;
 }
 
+// ---- calendar ----------------------------------------------------------
+
+.cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.cal-month {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--cyan);
+  min-width: 9rem;
+  text-align: center;
+}
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+  margin-top: 0.6rem;
+}
+.cal-wd {
+  text-align: center;
+  font-size: 0.6rem;
+  letter-spacing: 1.5px;
+  color: var(--ink-dim);
+  padding: 0.3rem 0;
+}
+.cal-cell {
+  min-height: 88px;
+  border: 1px solid rgba(36, 227, 255, 0.14);
+  background: rgba(4, 8, 14, 0.55);
+  padding: 0.25rem;
+  overflow: hidden;
+  @include cut(4px);
+  &.empty {
+    background: transparent;
+    border-color: transparent;
+  }
+  &.today {
+    border-color: var(--cyan);
+    box-shadow: inset 0 0 12px -6px var(--glow-cyan);
+  }
+}
+.cal-day {
+  display: block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--ink-dim);
+  margin-bottom: 0.2rem;
+}
+.cal-cell.today .cal-day {
+  color: var(--cyan-bright);
+}
+.cal-ep {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0.15rem 0.3rem;
+  margin-bottom: 0.15rem;
+  background: rgba(36, 227, 255, 0.1);
+  border-left: 2px solid var(--cyan);
+  cursor: default;
+  @include cut(3px);
+}
+.cal-ep-se {
+  font-size: 0.56rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--cyan);
+}
+.cal-ep-title {
+  font-size: 0.62rem;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .content {
   display: flex;
   flex-direction: column;

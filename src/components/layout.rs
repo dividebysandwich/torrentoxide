@@ -88,6 +88,7 @@ pub fn Layout() -> impl IntoView {
                     <A href="/">"DASHBOARD"</A>
                     <A href="/library">"LIBRARY"</A>
                     <A href="/wanted">"WANTED"</A>
+                    <A href="/calendar">"CALENDAR"</A>
                     <A href="/feeds">"FEEDS"</A>
                     <A href="/settings">"SETTINGS"</A>
                 </nav>

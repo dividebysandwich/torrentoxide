@@ -2,6 +2,7 @@ pub mod add_file_select;
 pub mod add_panel;
 pub mod bitfield;
 pub mod boot;
+pub mod calendar_page;
 pub mod confirm_modal;
 pub mod control_deck;
 pub mod dashboard;

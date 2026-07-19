@@ -4,9 +4,9 @@
 use leptos::prelude::*;
 
 use crate::types::{
-    AddRequest, Category, Defaults, DirListing, FileEntry, GrabHistoryEntry, Indexer, Library,
-    MediaSearchResult, ProviderInfo, QualityProfile, Release, RssFeed, Settings, TorrentDetail,
-    TorrentView, WantedItem,
+    AddRequest, CalendarEntry, Category, Defaults, DirListing, FileEntry, GrabHistoryEntry, Indexer,
+    Library, MediaSearchResult, ProviderInfo, QualityProfile, Release, RssFeed, Settings,
+    TorrentDetail, TorrentView, WantedItem,
 };
 
 #[server]
@@ -375,6 +375,17 @@ pub async fn remove_wanted(id: String) -> Result<(), ServerFnError> {
     state
         .pvr
         .remove_wanted(&id)
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn get_calendar() -> Result<Vec<CalendarEntry>, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .get_calendar()
+        .await
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 

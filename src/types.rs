@@ -360,6 +360,18 @@ pub struct GrabHistoryEntry {
     pub grabbed_at: u64,
 }
 
+/// An upcoming (or recent) episode air date for a monitored series.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CalendarEntry {
+    pub title: String,
+    pub season: i32,
+    pub episode: i32,
+    #[serde(default)]
+    pub name: String,
+    /// Air date, `YYYY-MM-DD`.
+    pub air_date: String,
+}
+
 /// Whether a wanted entry is a movie or a monitored series.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WantedKind {

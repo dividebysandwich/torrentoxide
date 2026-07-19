@@ -4,7 +4,7 @@
 use anyhow::{bail, Result};
 use serde::Deserialize;
 
-use crate::types::MediaSearchResult;
+use crate::types::{CalendarEntry, MediaSearchResult};
 
 const TMDB_BASE: &str = "https://api.themoviedb.org/3";
 
@@ -99,6 +99,64 @@ impl MetadataClient {
         }
         Ok(out)
     }
+
+    /// Episodes (with names + air dates) of a series' most recent seasons — for
+    /// the release calendar. Fetches the latest two seasons to cover a split run.
+    pub async fn upcoming_episodes(
+        &self,
+        key: &str,
+        tmdb_id: i64,
+        title: &str,
+    ) -> Result<Vec<CalendarEntry>> {
+        let details: TvDetails = self
+            .http
+            .get(format!("{TMDB_BASE}/tv/{tmdb_id}"))
+            .query(&[("api_key", key)])
+            .send()
+            .await?
+            .error_for_status()?
+            .json()
+            .await?;
+
+        let mut seasons: Vec<i32> = details
+            .seasons
+            .iter()
+            .map(|s| s.season_number)
+            .filter(|n| *n >= 1)
+            .collect();
+        seasons.sort_unstable();
+        let recent: Vec<i32> = seasons.into_iter().rev().take(2).collect();
+
+        let mut out = Vec::new();
+        for n in recent {
+            let resp = match self
+                .http
+                .get(format!("{TMDB_BASE}/tv/{tmdb_id}/season/{n}"))
+                .query(&[("api_key", key)])
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            let season: TvSeason = match resp.json().await {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+            for ep in season.episodes {
+                if let Some(date) = ep.air_date.filter(|d| !d.trim().is_empty()) {
+                    out.push(CalendarEntry {
+                        title: title.to_string(),
+                        season: n,
+                        episode: ep.episode_number,
+                        name: ep.name,
+                        air_date: date,
+                    });
+                }
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// A single aired episode identified by season + episode number.
@@ -129,6 +187,8 @@ struct TvSeason {
 struct TvEpisode {
     episode_number: i32,
     air_date: Option<String>,
+    #[serde(default)]
+    name: String,
 }
 
 #[derive(Deserialize)]

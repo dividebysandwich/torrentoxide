@@ -3,6 +3,7 @@ use leptos_meta::{provide_meta_context, MetaTags, Stylesheet, Title};
 use leptos_router::components::{ParentRoute, Route, Router, Routes};
 use leptos_router::path;
 
+use crate::components::calendar_page::CalendarPage;
 use crate::components::dashboard::Dashboard;
 use crate::components::feeds_page::FeedsPage;
 use crate::components::layout::Layout;
@@ -42,6 +43,7 @@ pub fn App() -> impl IntoView {
                     <Route path=path!("") view=Dashboard/>
                     <Route path=path!("library") view=LibraryPage/>
                     <Route path=path!("wanted") view=WantedPage/>
+                    <Route path=path!("calendar") view=CalendarPage/>
                     <Route path=path!("feeds") view=FeedsPage/>
                     <Route path=path!("settings") view=SettingsPage/>
                 </ParentRoute>
