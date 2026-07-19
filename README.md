@@ -198,6 +198,9 @@ works fine without touching any of it.
   edited or deleted.
 - A **grab history** shows what was fetched and from where.
 
+<img width="1213" height="776" alt="image" src="https://github.com/user-attachments/assets/dc9e9b57-daf0-43da-9b58-78be58016316" />
+
+
 ### Wanted & Calendar
 
 - **Wanted** — search TMDb and add a **movie** or **series** to monitor, with a
@@ -206,8 +209,15 @@ works fine without touching any of it.
   indexers, and grabs the best acceptable release (upgrading anything below the
   cutoff). **Without a Torznab indexer configured, the wanted list only powers
   the Calendar.**
+
+<img width="1213" height="776" alt="image" src="https://github.com/user-attachments/assets/8d267750-d8f4-4a1e-b1d9-a702600bf867" />
+
+  
 - **Calendar** — a month grid of upcoming/recent episode air dates for your
   monitored series (via TMDb).
+
+<img width="1215" height="686" alt="image" src="https://github.com/user-attachments/assets/e076a02b-c92d-41f5-a7a0-3d60eeb83f5b" />
+
 
 ### Library & import
 
