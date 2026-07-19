@@ -441,13 +441,28 @@ pub async fn rescan_library() -> Result<Library, ServerFnError> {
 pub async fn import_now() -> Result<Library, ServerFnError> {
     use crate::server::AppState;
     let state = expect_context::<AppState>();
+    state.pvr.import_and_reap().await;
     let pvr = state.pvr.clone();
-    tokio::task::spawn_blocking(move || {
-        pvr.import_finished();
-        pvr.scan_library()
-    })
-    .await
-    .map_err(|e| ServerFnError::new(e.to_string()))
+    tokio::task::spawn_blocking(move || pvr.scan_library())
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
+#[server]
+pub async fn get_import_mode() -> Result<String, ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    Ok(state.pvr.import_mode())
+}
+
+#[server]
+pub async fn set_import_mode(mode: String) -> Result<(), ServerFnError> {
+    use crate::server::AppState;
+    let state = expect_context::<AppState>();
+    state
+        .pvr
+        .set_import_mode(mode)
+        .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
 // --- grabbing / history -----------------------------------------------------

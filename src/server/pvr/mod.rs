@@ -34,8 +34,28 @@ const DEFAULT_FEED_POLL_MINS: u64 = 15;
 const SCAN_INTERVAL: Duration = Duration::from_secs(3600);
 /// How often finished TV downloads are imported into Show/Season folders.
 const IMPORT_INTERVAL: Duration = Duration::from_secs(300);
+const IMPORT_MODE_KEY: &str = "import_mode";
 
 const VIDEO_EXTS: [&str; 9] = ["mkv", "mp4", "avi", "m4v", "mov", "ts", "webm", "mpg", "wmv"];
+
+/// How a finished download is placed into the organized library.
+#[derive(Clone, Copy, PartialEq)]
+enum ImportMode {
+    /// Relocate the file (one clean copy; stops seeding — the torrent is forgotten).
+    Move,
+    /// Link the file into place, keeping the download seedable (same filesystem).
+    Hardlink,
+    /// Duplicate the file (doubles disk, keeps seeding).
+    Copy,
+}
+
+fn parse_import_mode(s: &str) -> ImportMode {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "hardlink" => ImportMode::Hardlink,
+        "copy" => ImportMode::Copy,
+        _ => ImportMode::Move,
+    }
+}
 
 fn is_video_name(name: &str) -> bool {
     name.rsplit('.')
@@ -208,8 +228,7 @@ impl Pvr {
             let mut interval = tokio::time::interval(IMPORT_INTERVAL);
             loop {
                 interval.tick().await;
-                let i = importer.clone();
-                let _ = tokio::task::spawn_blocking(move || i.import_finished()).await;
+                importer.import_and_reap().await;
             }
         });
 
@@ -231,10 +250,43 @@ impl Pvr {
         self.store.get_library().unwrap_or_default()
     }
 
-    /// Hard-link finished TV-category downloads into `<cat>/<Show>/Season NN/`,
-    /// renamed `<Show> - SxxEyy.ext`. Only active torrents are considered, so the
-    /// pre-existing library is untouched. Returns the number of files imported.
-    pub fn import_finished(&self) -> usize {
+    pub fn import_mode(&self) -> String {
+        self.store
+            .get_config(IMPORT_MODE_KEY)
+            .ok()
+            .flatten()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| "move".to_string())
+    }
+
+    pub fn set_import_mode(&self, mode: String) -> Result<()> {
+        let m = match mode.trim().to_ascii_lowercase().as_str() {
+            "hardlink" => "hardlink",
+            "copy" => "copy",
+            _ => "move",
+        };
+        self.store.set_config(IMPORT_MODE_KEY, m)
+    }
+
+    /// Run the import, then (for moved torrents) forget them so librqbit doesn't
+    /// re-download the now-missing files. Returns the number of files imported.
+    pub async fn import_and_reap(self: &Arc<Self>) -> usize {
+        let me = self.clone();
+        let (count, forget) = tokio::task::spawn_blocking(move || me.import_finished())
+            .await
+            .unwrap_or((0, Vec::new()));
+        for id in forget {
+            let _ = self.engine.cancel(id).await;
+        }
+        count
+    }
+
+    /// Place finished TV-category downloads into `<cat>/<Show>/Season NN/`, renamed
+    /// `<Show> - SxxEyy.ext`, using the configured import mode. Only active torrents
+    /// are considered, so the pre-existing library is untouched. Returns
+    /// `(files_imported, torrent_ids_to_forget)` (the latter only for Move).
+    pub fn import_finished(&self) -> (usize, Vec<u64>) {
+        let mode = parse_import_mode(&self.import_mode());
         let cats = self.store.list_categories().unwrap_or_default();
         let library = self.store.get_library().unwrap_or_default();
         let snapshot = self.engine.current();
@@ -250,6 +302,7 @@ impl Pvr {
             .collect();
 
         let mut imported = 0usize;
+        let mut moved: std::collections::HashSet<u64> = std::collections::HashSet::new();
         for t in &snapshot.torrents {
             if t.pending || !matches!(t.state, TorrentState::Finished) {
                 continue;
@@ -298,23 +351,40 @@ impl Pvr {
                 let target = target_dir.join(format!("{display} - S{s:02}E{e:02}.{ext}"));
 
                 if target.exists() {
+                    // Already organized; in Move mode drop the redundant download.
+                    if mode == ImportMode::Move {
+                        let _ = std::fs::remove_file(&src);
+                        moved.insert(t.id);
+                    }
                     let _ = self.store.mark_imported(&src_str);
                     continue;
                 }
                 if std::fs::create_dir_all(&target_dir).is_err() {
                     continue;
                 }
-                // Hard-link (keeps the download seedable); fall back to a copy.
-                let linked = std::fs::hard_link(&src, &target).is_ok()
-                    || std::fs::copy(&src, &target).is_ok();
-                if linked {
+                let placed = match mode {
+                    ImportMode::Move => {
+                        std::fs::rename(&src, &target).is_ok()
+                            || (std::fs::copy(&src, &target).is_ok()
+                                && std::fs::remove_file(&src).is_ok())
+                    }
+                    ImportMode::Hardlink => {
+                        std::fs::hard_link(&src, &target).is_ok()
+                            || std::fs::copy(&src, &target).is_ok()
+                    }
+                    ImportMode::Copy => std::fs::copy(&src, &target).is_ok(),
+                };
+                if placed {
                     let _ = self.store.mark_imported(&src_str);
                     imported += 1;
+                    if mode == ImportMode::Move {
+                        moved.insert(t.id);
+                    }
                     tracing::info!("imported {} -> {}", src.display(), target.display());
                 }
             }
         }
-        imported
+        (imported, moved.into_iter().collect())
     }
 
     // --- wanted / monitor --------------------------------------------------

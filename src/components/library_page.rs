@@ -3,7 +3,7 @@
 use leptos::prelude::*;
 use leptos::task::spawn_local;
 
-use crate::api::{get_library, import_now, rescan_library};
+use crate::api::{get_import_mode, get_library, import_now, rescan_library, set_import_mode};
 use crate::types::{fmt_bytes, Library};
 
 #[derive(Clone, Copy, PartialEq)]
@@ -17,14 +17,26 @@ pub fn LibraryPage() -> impl IntoView {
     let library = RwSignal::new(Library::default());
     let status = RwSignal::new(String::new());
     let tab = RwSignal::new(Tab::Movies);
+    let mode = RwSignal::new("move".to_string());
 
     Effect::new(move |_| {
         spawn_local(async move {
             if let Ok(l) = get_library().await {
                 library.set(l);
             }
+            if let Ok(m) = get_import_mode().await {
+                mode.set(m);
+            }
         });
     });
+
+    let on_mode = move |e| {
+        let m = event_target_value(&e);
+        mode.set(m.clone());
+        spawn_local(async move {
+            let _ = set_import_mode(m).await;
+        });
+    };
 
     let rescan = move |_| {
         status.set("Scanning…".into());
@@ -61,11 +73,19 @@ pub fn LibraryPage() -> impl IntoView {
             <section class="panel settings-section">
                 <div class="files-head">
                     <h2 class="page-title">"LIBRARY"</h2>
+                    <select class="sort-select" prop:value=move || mode.get() on:change=on_mode>
+                        <option value="move">"MOVE"</option>
+                        <option value="hardlink">"HARDLINK"</option>
+                        <option value="copy">"COPY"</option>
+                    </select>
                     <button class="btn btn-ghost btn-sm" on:click=import>"Import"</button>
                     <button class="btn btn-primary btn-sm" on:click=rescan>"Rescan"</button>
                 </div>
                 <p class="settings-hint">
-                    "Movies and TV episodes found in the download folder. Category kind (Movie/TV) and folder layout drive classification; rescans run hourly or on demand."
+                    "Movies and TV episodes found in the download folder. Category kind (Movie/TV) and folder layout drive classification; rescans run hourly or on demand. "
+                    <b>"Import"</b>" organizes finished TV downloads into "<code>"Show/Season NN"</code>" folders — "
+                    <b>"Move"</b>" (default) relocates the file for one clean copy and stops seeding that torrent; "
+                    <b>"Hardlink"</b>" links it and keeps seeding (best when your download folder is separate from what your media server scans)."
                 </p>
                 <p class="add-status">{move || status.get()}</p>
 
