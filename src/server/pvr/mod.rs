@@ -309,11 +309,15 @@ impl Pvr {
 
     // --- library -----------------------------------------------------------
 
-    /// Walk the download tree, rebuild the library snapshot and persist it.
+    /// Walk the media root (`BROWSE_ROOT`, under which the category folders and
+    /// organized library live — the download folder is normally a sub-folder of
+    /// it), rebuild the library snapshot and persist it. Scanning the media root
+    /// rather than just the download folder is what lets the monitor see media
+    /// that's already on disk and avoid re-downloading it.
     pub fn scan_library(&self) -> Library {
         let cats = self.store.list_categories().unwrap_or_default();
         let imported = self.store.imported_paths().unwrap_or_default();
-        let lib = scan::scan(&self.config.download_dir, now_secs(), &cats, &imported);
+        let lib = scan::scan(&self.config.browse_root, now_secs(), &cats, &imported);
         let _ = self.store.set_library(&lib);
         lib
     }
@@ -969,14 +973,15 @@ impl Pvr {
         Ok(grabbed)
     }
 
-    /// Resolve a category's sub-directory to an absolute path confined to the
-    /// download folder (routes through the engine's path-traversal guard).
+    /// Resolve a category's sub-directory to an absolute path under the media
+    /// root (`BROWSE_ROOT`), where the organized library lives — not under the
+    /// download folder. Routes through the engine's path-traversal guard.
     fn category_dir(&self, subdir: &str) -> Result<PathBuf> {
         let sub = subdir.trim().trim_start_matches(['/', '\\']);
-        let joined = self.config.download_dir.join(sub);
+        let joined = self.config.browse_root.join(sub);
         let confined = self.engine.confine(&joined.to_string_lossy())?;
-        if !confined.starts_with(&self.config.download_dir) {
-            bail!("category directory must be under the download folder");
+        if !confined.starts_with(&self.config.browse_root) {
+            bail!("category directory must be under the media root (BROWSE_ROOT)");
         }
         Ok(confined)
     }

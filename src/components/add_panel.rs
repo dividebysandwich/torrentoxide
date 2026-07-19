@@ -25,18 +25,18 @@ pub fn AddTorrentPanel() -> impl IntoView {
     let file_ref: NodeRef<html::Input> = NodeRef::new();
 
     // The directory the picker should open at: the selected category's folder
-    // (download dir + subdir), or None to fall back to the default download dir.
+    // (media root + subdir), or None to fall back to the default download dir.
     let cat_start = move || {
         let slug = category.get();
         if slug.is_empty() {
             return None;
         }
-        let dl = state.defaults.get().download_dir;
+        let base = state.defaults.get().browse_root;
         state.categories.get().iter().find(|c| c.slug == slug).map(|c| {
-            if dl.is_empty() {
+            if base.is_empty() {
                 c.subdir.clone()
             } else {
-                format!("{}/{}", dl.trim_end_matches('/'), c.subdir)
+                format!("{}/{}", base.trim_end_matches('/'), c.subdir)
             }
         })
     };

@@ -162,7 +162,7 @@ fn CategoriesSection() -> impl IntoView {
         <section class="panel settings-section">
             <h2 class="page-title">"CATEGORIES"</h2>
             <p class="settings-hint">
-                "Map a category to a sub-folder under the download directory. New downloads can target a category, and the torrent list can be filtered by it."
+                "Map a category to a sub-folder under the media root (BROWSE_ROOT) — e.g. a \"TV Shows\" folder directly under it. This is where the library lives and where categorized downloads are organized. New downloads can target a category, and the torrent list can be filtered by it."
             </p>
             <div class="cat-form">
                 <input
