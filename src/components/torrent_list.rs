@@ -167,28 +167,6 @@ pub fn TorrentList() -> impl IntoView {
         }
     };
 
-    // Status filter chips (single-select).
-    let chips = StatusFilter::ALL
-        .iter()
-        .map(|&f| {
-            view! {
-                <button
-                    class="filter-chip"
-                    class:active=move || status.get() == f
-                    on:click=move |_| status.set(f)
-                >
-                    {f.label()}
-                </button>
-            }
-        })
-        .collect::<Vec<_>>();
-
-    // Sort-key options.
-    let sort_opts = SortKey::ALL
-        .iter()
-        .enumerate()
-        .map(|(i, &k)| view! { <option value=i.to_string()>{k.label()}</option> })
-        .collect::<Vec<_>>();
     let sort_index = move || SortKey::ALL.iter().position(|k| *k == sort_key.get()).unwrap_or(0);
 
     view! {
@@ -202,7 +180,22 @@ pub fn TorrentList() -> impl IntoView {
                         prop:value=move || query.get()
                         on:input=move |e| query.set(event_target_value(&e))
                     />
-                    <div class="filter-chips">{chips.clone()}</div>
+                    <div class="filter-chips">
+                        {StatusFilter::ALL
+                            .iter()
+                            .map(|&f| {
+                                view! {
+                                    <button
+                                        class="filter-chip"
+                                        class:active=move || status.get() == f
+                                        on:click=move |_| status.set(f)
+                                    >
+                                        {f.label()}
+                                    </button>
+                                }
+                            })
+                            .collect_view()}
+                    </div>
                     <div class="sort-controls">
                         <span class="sort-label">"SORT"</span>
                         <select
@@ -213,7 +206,13 @@ pub fn TorrentList() -> impl IntoView {
                                 sort_key.set(SortKey::ALL[i.min(SortKey::ALL.len() - 1)]);
                             }
                         >
-                            {sort_opts.clone()}
+                            {SortKey::ALL
+                                .iter()
+                                .enumerate()
+                                .map(|(i, &k)| {
+                                    view! { <option value=i.to_string()>{k.label()}</option> }
+                                })
+                                .collect_view()}
                         </select>
                         <button
                             class="sort-dir"
