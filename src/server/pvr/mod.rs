@@ -625,7 +625,14 @@ impl Pvr {
         let wanted = self.store.list_wanted()?;
         let profiles = self.store.list_quality_profiles()?;
         let library = self.store.get_library().unwrap_or_default();
-        let today = chrono::Utc::now().format("%Y-%m-%d").to_string();
+        // Treat an episode as airable up to a day before its TMDb air date:
+        // releases (esp. anime on JST/Amazon) hit trackers before the UTC
+        // calendar date of the air date. Searching a day early is harmless —
+        // nothing matches until a release actually exists, and we retry on the
+        // next cycle.
+        let cutoff = (chrono::Utc::now() + chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string();
         let key = self.tmdb_key();
         let mut grabbed = 0usize;
 
@@ -642,7 +649,7 @@ impl Pvr {
                     let Some(key) = key.as_deref() else { continue };
                     let episodes = self
                         .meta
-                        .series_aired_episodes(key, w.tmdb_id, &today)
+                        .series_aired_episodes(key, w.tmdb_id, &cutoff)
                         .await
                         .unwrap_or_default();
                     for ep in episodes {

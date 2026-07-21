@@ -66,12 +66,14 @@ impl MetadataClient {
         Ok(body.results.into_iter().filter_map(SearchItem::into_meta).collect())
     }
 
-    /// All episodes of a series that have aired on/before `today` (YYYY-MM-DD).
+    /// All episodes of a series whose air date is on/before `cutoff` (YYYY-MM-DD).
+    /// The monitor passes a small look-ahead cutoff so episodes are grabbable as
+    /// soon as they appear on trackers (before the UTC date of their air date).
     pub async fn series_aired_episodes(
         &self,
         key: &str,
         tmdb_id: i64,
-        today: &str,
+        cutoff: &str,
     ) -> Result<Vec<AiredEpisode>> {
         let details: TvDetails = self
             .http
@@ -103,7 +105,7 @@ impl MetadataClient {
                 let aired = ep
                     .air_date
                     .as_deref()
-                    .map(|d| !d.is_empty() && d <= today)
+                    .map(|d| !d.is_empty() && d <= cutoff)
                     .unwrap_or(false);
                 if aired {
                     out.push(AiredEpisode {
