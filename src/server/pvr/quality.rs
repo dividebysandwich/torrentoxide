@@ -106,13 +106,18 @@ pub fn score(p: &ParsedRelease, prof: &QualityProfile) -> Option<i64> {
             return None;
         }
     }
-    // Language requirement — an untagged release is assumed to match.
+    // Language requirement — an untagged release is assumed to match. A
+    // "multi"/"dual" release bundles several audio/sub languages (typically
+    // including the wanted one), so it satisfies any language requirement —
+    // otherwise most anime (tagged MULTi / Dual-Audio / Multi-Subs) is rejected.
     if !prof.languages.is_empty() {
         if let Some(lang) = &p.language {
-            let ok = prof.languages.iter().any(|w| {
-                let w = w.trim().to_lowercase();
-                !w.is_empty() && (lang.contains(&w) || w.contains(lang.as_str()))
-            });
+            let multi = matches!(lang.as_str(), "multi" | "dual");
+            let ok = multi
+                || prof.languages.iter().any(|w| {
+                    let w = w.trim().to_lowercase();
+                    !w.is_empty() && (lang.contains(&w) || w.contains(lang.as_str()))
+                });
             if !ok {
                 return None;
             }

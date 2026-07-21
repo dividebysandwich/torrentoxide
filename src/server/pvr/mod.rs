@@ -213,7 +213,9 @@ fn best_acceptable(
             };
             Some((r.clone(), sc))
         })
-        .max_by_key(|(_, sc)| *sc)
+        // Highest quality score; break ties toward the most seeders so we grab a
+        // healthy release (fetches metadata quickly) rather than a near-dead one.
+        .max_by_key(|(r, sc)| (*sc, r.seeders.unwrap_or(0)))
 }
 
 fn now_secs() -> u64 {
@@ -1180,4 +1182,64 @@ fn slugify(s: &str) -> String {
         }
     }
     out.trim_matches('-').to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{HdrPref, QualityProfile, Release, Resolution};
+
+    fn rel(title: &str, seeders: u32) -> Release {
+        Release {
+            title: title.to_string(),
+            url: format!("magnet:{title}"),
+            size: 0,
+            seeders: Some(seeders),
+            indexer: "t".into(),
+        }
+    }
+
+    fn profile_1080p_english() -> QualityProfile {
+        QualityProfile {
+            id: "1080p".into(),
+            name: "1080p".into(),
+            min_resolution: Resolution::R1080,
+            cutoff_resolution: Resolution::R1080,
+            hdr: HdrPref::Ignore,
+            languages: vec!["english".into()],
+            preferred_groups: vec![],
+            blocked_groups: vec![],
+            upgrade_allowed: true,
+        }
+    }
+
+    /// A `MULTi` / Dual-Audio release (parsed language "multi") satisfies an
+    /// `english` requirement, and among equal-quality matches best_acceptable
+    /// grabs the most-seeded — regression for the "monitor rejects multi-audio
+    /// anime / grabs a near-dead release" bug (real THE GHOST IN THE SHELL S01E03
+    /// results from nyaa via Jackett).
+    #[test]
+    fn prefers_well_seeded_multi_audio() {
+        let profile = profile_1080p_english();
+        let releases = vec![
+            rel("The.Ghost.in.The.Shell.S01E03.VOSTFR.1080p.WEBRiP.x265-KAF", 77),
+            rel("[ToonsHub] THE GHOST IN THE SHELL S01E03 1080p AMZN WEB-DL DUAL DDP2.0 H.265 (Dual-Audio, Multi-Subs)", 3829),
+            rel("THE GHOST IN THE SHELL S01E03 1080p AMZN WEB-DL DUAL DDP2.0 H.264-VARYG (Dual-Audio, Multi-Subs)", 920),
+            rel("Ghost in the Shell SAC 2045 S01E03 720p WEB H264-CONFRONT", 2),
+        ];
+        let (picked, _) =
+            best_acceptable(&releases, Some(&profile), "THE GHOST IN THE SHELL", Some(1), Some(3))
+                .expect("a multi-audio 1080p release should be acceptable");
+        // The 3829-seeder WEB-DL wins over the 77-seeder WEBRiP and the 720p one.
+        assert_eq!(picked.seeders, Some(3829));
+    }
+
+    /// A French-only release must still be rejected when `english` is required.
+    #[test]
+    fn rejects_wrong_single_language() {
+        let profile = profile_1080p_english();
+        let p = quality::parse_release("Some.Show.S01E03.FRENCH.1080p.WEB-DL.x265-GRP");
+        assert_eq!(p.language.as_deref(), Some("french"));
+        assert!(quality::score(&p, &profile).is_none());
+    }
 }
