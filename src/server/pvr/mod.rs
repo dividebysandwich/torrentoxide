@@ -17,7 +17,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 
 use crate::server::config::AppConfig;
 use crate::server::engine::Engine;
@@ -99,6 +99,15 @@ fn parse_import_mode(s: &str) -> ImportMode {
         "hardlink" => ImportMode::Hardlink,
         "copy" => ImportMode::Copy,
         _ => ImportMode::Move,
+    }
+}
+
+/// Past-tense verb for a placement, for logging.
+fn mode_verb(mode: ImportMode) -> &'static str {
+    match mode {
+        ImportMode::Move => "moved",
+        ImportMode::Hardlink => "hardlinked",
+        ImportMode::Copy => "copied",
     }
 }
 
@@ -404,7 +413,10 @@ impl Pvr {
             .await
             .unwrap_or((0, Vec::new()));
         for id in forget {
-            let _ = self.engine.cancel(id).await;
+            match self.engine.cancel(id).await {
+                Ok(()) => tracing::info!("import: forgot torrent id={id} (files moved into the library)"),
+                Err(e) => tracing::warn!("import: failed to forget torrent id={id}: {e}"),
+            }
         }
         count
     }
@@ -420,36 +432,104 @@ impl Pvr {
         let library = self.store.get_library().unwrap_or_default();
         let snapshot = self.engine.current();
         let incoming = self.config.download_dir.join(INCOMING_DIR);
+        let categories = self.store.list_categories().unwrap_or_default();
+
+        let finished: Vec<_> = snapshot
+            .torrents
+            .iter()
+            .filter(|t| !t.pending && matches!(t.state, TorrentState::Finished))
+            .collect();
+        tracing::info!(
+            "import: considering {} finished torrent(s) (mode={}, staging={})",
+            finished.len(),
+            self.import_mode(),
+            incoming.display()
+        );
 
         let mut placed_total = 0usize;
         let mut forget: HashSet<u64> = HashSet::new();
 
-        for t in &snapshot.torrents {
-            if t.pending || !matches!(t.state, TorrentState::Finished) {
-                continue;
-            }
-            // Staging token = first path component under DOWNLOAD_DIR/.incoming.
+        for t in finished {
             let of = Path::new(&t.output_folder);
-            let Some(token) = of
+            // Staging token = first path component under DOWNLOAD_DIR/.incoming.
+            let token = of
                 .strip_prefix(&incoming)
                 .ok()
                 .and_then(|rel| rel.components().next())
                 .and_then(|c| c.as_os_str().to_str())
-                .map(str::to_string)
-            else {
-                continue; // not one of our staged downloads
+                .map(str::to_string);
+
+            // Resolve the destination: a staged download has a recorded target;
+            // otherwise fall back to a TV category folder the files already sit in
+            // (grabs from an older build / manual adds into a category).
+            let (target_dir, organize_tv) = match &token {
+                Some(tok) => match self.store.get_download_target(tok).ok().flatten() {
+                    Some(tgt) => (tgt.target_dir, tgt.organize_tv),
+                    None => match self.category_of_path(of, &categories) {
+                        Some((dir, tv)) => {
+                            tracing::warn!(
+                                "import: \"{}\" (id={}) staged token={} has no recorded target; \
+                                 falling back to category dir {}",
+                                t.name, t.id, tok, dir
+                            );
+                            (dir, tv)
+                        }
+                        None => {
+                            tracing::warn!(
+                                "import: skip \"{}\" (id={}) — staged (token={}) but no target \
+                                 recorded and not inside a category dir (output={})",
+                                t.name, t.id, tok, of.display()
+                            );
+                            continue;
+                        }
+                    },
+                },
+                None => match self.category_of_path(of, &categories) {
+                    Some((dir, true)) => {
+                        tracing::info!(
+                            "import: \"{}\" (id={}) not staged; organizing in TV category dir {}",
+                            t.name, t.id, dir
+                        );
+                        (dir, true)
+                    }
+                    Some((_, false)) => {
+                        tracing::info!(
+                            "import: skip \"{}\" (id={}) — already in its (non-TV) category folder, \
+                             nothing to organize",
+                            t.name, t.id
+                        );
+                        continue;
+                    }
+                    None => {
+                        tracing::info!(
+                            "import: skip \"{}\" (id={}) — not a staged download and not inside a \
+                             category folder (output={})",
+                            t.name, t.id, of.display()
+                        );
+                        continue;
+                    }
+                },
             };
-            let Some(tgt) = self.store.get_download_target(&token).ok().flatten() else {
-                continue; // no destination recorded (already handled, or foreign)
-            };
+
             let detail = match self.engine.detail(t.id) {
                 Ok(d) => d,
-                Err(_) => continue,
+                Err(e) => {
+                    tracing::warn!(
+                        "import: skip \"{}\" (id={}) — could not read torrent details: {e}",
+                        t.name, t.id
+                    );
+                    continue;
+                }
             };
             let base = Path::new(&detail.output_folder);
-            let target_root = Path::new(&tgt.target_dir);
+            let target_root = Path::new(&target_dir);
+            tracing::info!(
+                "import: \"{}\" (id={}) → {} (organize_tv={}, {} file(s), from {})",
+                t.name, t.id, target_dir, organize_tv, detail.files.len(), base.display()
+            );
 
             let mut failures = 0usize; // attempted-but-not-placed files
+            let mut placed_here = 0usize;
             for f in &detail.files {
                 let mut src = base.to_path_buf();
                 for comp in &f.components {
@@ -457,16 +537,18 @@ impl Pvr {
                 }
                 let src_str = src.to_string_lossy().into_owned();
                 if self.store.is_imported(&src_str).unwrap_or(false) {
-                    continue; // already placed in a previous pass (hardlink/copy)
+                    tracing::debug!("import:   skip {} (already imported)", src.display());
+                    continue;
                 }
                 let Some(fname) = src.file_name().and_then(|n| n.to_str()).map(String::from) else {
                     continue;
                 };
 
                 // Decide this file's destination.
-                let dest: Option<PathBuf> = if tgt.organize_tv {
+                let dest: Option<PathBuf> = if organize_tv {
                     if !is_video_name(&fname) {
-                        continue; // leave subs/nfo behind for organized TV
+                        tracing::debug!("import:   leave non-video {} in place (TV organize)", fname);
+                        continue;
                     }
                     let parsed = quality::parse_release(&fname);
                     let se = scan::extract_se(&fname);
@@ -501,39 +583,92 @@ impl Pvr {
                 };
 
                 let Some(dest) = dest else {
+                    tracing::warn!(
+                        "import:   cannot organize {} — no season/episode parsed from the file name",
+                        fname
+                    );
                     failures += 1;
                     continue;
                 };
                 match self.place_file(&src, &dest, mode) {
-                    Ok(placed_now) => {
+                    Ok(true) => {
+                        let _ = self.store.mark_imported(&src_str);
+                        placed_total += 1;
+                        placed_here += 1;
+                        if mode == ImportMode::Move {
+                            forget.insert(t.id);
+                        }
+                        tracing::info!("import:   {} {} → {}", mode_verb(mode), src.display(), dest.display());
+                    }
+                    Ok(false) => {
                         let _ = self.store.mark_imported(&src_str);
                         if mode == ImportMode::Move {
                             forget.insert(t.id);
                         }
-                        if placed_now {
-                            placed_total += 1;
-                            tracing::info!("imported {} -> {}", src.display(), dest.display());
-                        }
+                        tracing::info!(
+                            "import:   already present at {} — leaving library copy, {} staged copy",
+                            dest.display(),
+                            if mode == ImportMode::Move { "removed" } else { "kept" }
+                        );
                     }
-                    Err(_) => failures += 1,
+                    Err(e) => {
+                        tracing::error!(
+                            "import:   FAILED to place {} → {}: {e:#}",
+                            src.display(), dest.display()
+                        );
+                        failures += 1;
+                    }
                 }
             }
 
             if failures == 0 {
-                // Everything intended has been placed: finalize this download.
                 if mode == ImportMode::Move {
                     forget.insert(t.id);
-                    remove_empty_dirs(&incoming.join(&token));
+                    if let Some(tok) = &token {
+                        remove_empty_dirs(&incoming.join(tok));
+                    }
                 }
-                let _ = self.store.remove_download_target(&token);
+                if let Some(tok) = &token {
+                    let _ = self.store.remove_download_target(tok);
+                }
+                tracing::info!("import: \"{}\" done — {} file(s) placed", t.name, placed_here);
+            } else {
+                tracing::warn!(
+                    "import: \"{}\" left in place — {} file(s) failed (see errors above); \
+                     will retry next pass",
+                    t.name, failures
+                );
             }
         }
+        tracing::info!("import: pass complete — {} file(s) placed", placed_total);
         (placed_total, forget.into_iter().collect())
     }
 
+    /// The deepest category whose resolved folder contains `path`, as
+    /// `(folder, is_tv)`. Used to organize non-staged downloads (older grabs).
+    fn category_of_path(&self, path: &Path, categories: &[Category]) -> Option<(String, bool)> {
+        let mut best: Option<(PathBuf, bool)> = None;
+        for c in categories {
+            let Ok(dir) = self.category_dir(&c.subdir) else { continue };
+            if path == dir || path.starts_with(&dir) {
+                let deeper = best
+                    .as_ref()
+                    .map(|(d, _)| dir.as_os_str().len() > d.as_os_str().len())
+                    .unwrap_or(true);
+                if deeper {
+                    best = Some((dir, c.kind == MediaKind::Tv));
+                }
+            }
+        }
+        best.map(|(d, tv)| (d.to_string_lossy().into_owned(), tv))
+    }
+
     /// Place `src` at `dest` per `mode`. `Ok(true)` = placed now; `Ok(false)` =
-    /// `dest` already existed (staged copy dropped in Move mode); `Err` = failed.
+    /// `dest` already existed; `Err` carries the real OS error (with context).
     fn place_file(&self, src: &Path, dest: &Path, mode: ImportMode) -> Result<bool> {
+        if !src.exists() {
+            bail!("source file is missing: {}", src.display());
+        }
         if dest.exists() {
             if mode == ImportMode::Move {
                 let _ = std::fs::remove_file(src);
@@ -541,22 +676,37 @@ impl Pvr {
             return Ok(false);
         }
         if let Some(parent) = dest.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("could not create destination folder {}", parent.display()))?;
         }
-        let ok = match mode {
+        match mode {
             ImportMode::Move => {
-                std::fs::rename(src, dest).is_ok()
-                    || (std::fs::copy(src, dest).is_ok() && std::fs::remove_file(src).is_ok())
+                // Try a fast rename; fall back to copy+delete across filesystems.
+                if std::fs::rename(src, dest).is_ok() {
+                    return Ok(true);
+                }
+                std::fs::copy(src, dest).with_context(|| {
+                    format!("copy {} → {} failed (rename across filesystems fell back to copy)",
+                        src.display(), dest.display())
+                })?;
+                std::fs::remove_file(src)
+                    .with_context(|| format!("copied but could not remove source {}", src.display()))?;
+                Ok(true)
             }
             ImportMode::Hardlink => {
-                std::fs::hard_link(src, dest).is_ok() || std::fs::copy(src, dest).is_ok()
+                if std::fs::hard_link(src, dest).is_ok() {
+                    return Ok(true);
+                }
+                std::fs::copy(src, dest).with_context(|| {
+                    format!("hardlink failed and copy {} → {} also failed", src.display(), dest.display())
+                })?;
+                Ok(true)
             }
-            ImportMode::Copy => std::fs::copy(src, dest).is_ok(),
-        };
-        if ok {
-            Ok(true)
-        } else {
-            bail!("failed to place {}", src.display())
+            ImportMode::Copy => {
+                std::fs::copy(src, dest)
+                    .with_context(|| format!("copy {} → {} failed", src.display(), dest.display()))?;
+                Ok(true)
+            }
         }
     }
 
